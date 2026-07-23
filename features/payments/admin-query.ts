@@ -34,7 +34,7 @@ function jstDate(iso: string | null): string {
   return new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10);
 }
 
-export async function loadBoard(opts: { month: string; status?: string }): Promise<Board> {
+export async function loadBoard(opts: { month: string; status?: string; q?: string }): Promise<Board> {
   const svc = createSupabaseService();
   const policy = await loadBillingPolicy();
   const today = todayJst();
@@ -126,9 +126,17 @@ export async function loadBoard(opts: { month: string; status?: string }): Promi
     };
   });
 
-  const filtered = opts.status && opts.status !== "all"
+  let filtered = opts.status && opts.status !== "all"
     ? rows.filter((r) => (opts.status === "alert" ? r.billingAlert : r.statusLabel === opts.status))
     : rows;
+
+  // 会員ID または お客様名での検索
+  const q = (opts.q ?? "").trim().toLowerCase();
+  if (q) {
+    filtered = filtered.filter(
+      (r) => r.accountId.toLowerCase().includes(q) || (r.name ?? "").toLowerCase().includes(q),
+    );
+  }
 
   const counts = {
     total: rows.length,

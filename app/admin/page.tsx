@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { LogOut, AlertTriangle, RefreshCw, Settings } from "lucide-react";
+import { LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { todayJst } from "@/features/payments/billing-config";
 import { cancelAction, logoutAction } from "./actions";
 import CancelButton from "./CancelButton";
+import CopyButton from "./CopyButton";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "登録者管理 | Memoreal Payments" };
@@ -36,13 +37,15 @@ function statusBadge(v: RegistrantRow["statusLabel"]) {
 export default async function AdminBoardPage({
   searchParams,
 }: {
-  searchParams: { month?: string; status?: string };
+  searchParams: { month?: string; status?: string; q?: string };
 }) {
   requireAdmin();
 
   const month = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : todayJst().slice(0, 7);
   const status = searchParams.status ?? "all";
-  const { rows, counts } = await loadBoard({ month, status });
+  const q = searchParams.q ?? "";
+  const { rows, counts } = await loadBoard({ month, status, q });
+  const exportQs = new URLSearchParams({ month, status, q }).toString();
 
   return (
     <main className="min-h-screen bg-bg p-4 sm:p-6">
@@ -53,8 +56,14 @@ export default async function AdminBoardPage({
             <h1 className="text-xl font-bold text-navy">登録者管理ボード</h1>
             <p className="text-xs text-muted">継続課金の登録者一覧・当月の利用/課金状況</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Link href={`/admin?month=${month}&status=${status}`} className="btn flex items-center gap-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Link href={`/admin/revenue?month=${month}`} className="btn btn-primary flex items-center gap-1">
+              <TrendingUp size={14} />売上予測ボード
+            </Link>
+            <a href={`/admin/export?${exportQs}`} className="btn flex items-center gap-1">
+              <Download size={14} />CSV出力
+            </a>
+            <Link href={`/admin?month=${month}&status=${status}&q=${encodeURIComponent(q)}`} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
             </Link>
             <Link href="/admin/settings" className="btn flex items-center gap-1">
@@ -68,10 +77,14 @@ export default async function AdminBoardPage({
 
         {/* サマリ + 月選択 */}
         <div className="card p-4 flex flex-wrap items-center gap-4">
-          <form method="get" className="flex items-end gap-2">
+          <form method="get" className="flex items-end gap-2 flex-wrap">
             <div>
               <div className="label mb-1">対象月</div>
               <input type="month" name="month" defaultValue={month} className="input" />
+            </div>
+            <div>
+              <div className="label mb-1 flex items-center gap-1"><Search size={11} />会員ID / お客様名</div>
+              <input type="search" name="q" defaultValue={q} placeholder="MR… または 氏名" className="input w-52" />
             </div>
             <input type="hidden" name="status" value={status} />
             <button className="btn btn-primary">表示</button>
@@ -92,7 +105,7 @@ export default async function AdminBoardPage({
           {STATUS_TABS.map((t) => (
             <Link
               key={t.key}
-              href={`/admin?month=${month}&status=${t.key}`}
+              href={`/admin?month=${month}&status=${t.key}&q=${encodeURIComponent(q)}`}
               className={"chip " + (status === t.key ? "chip-navy" : "hover:border-navy/40")}
             >
               {t.label}
@@ -126,7 +139,9 @@ export default async function AdminBoardPage({
               {rows.map((r) => (
                 <tr key={r.accountId} className={"border-b border-border/60 " + (r.billingAlert ? "bg-bad/5" : "")}>
                   <td className="px-3 py-2 text-muted">{r.appliedAt}</td>
-                  <td className="px-3 py-2 font-mono text-xs">{r.accountId}</td>
+                  <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
+                    {r.accountId} <CopyButton value={r.accountId} />
+                  </td>
                   <td className="px-3 py-2">{r.planName}</td>
                   <td className="px-3 py-2 text-muted">{r.serviceStart}</td>
                   <td className="px-3 py-2 text-muted">{r.chargeStart}</td>
