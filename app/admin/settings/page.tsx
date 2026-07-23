@@ -3,6 +3,7 @@ import { Save, ArrowLeft, Plus } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadPlans } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
+import { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } from "@/features/payments/payment-settings";
 import { saveSettingsAction } from "../actions";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
   requireAdmin();
   const plans = await loadPlans();
   const policy = await loadBillingPolicy();
+  const raw = await loadPaymentSettings();
+  const welcomeSubject = raw.welcomeEmail?.subject || DEFAULT_WELCOME_SUBJECT;
+  const welcomeBody = raw.welcomeEmail?.body || DEFAULT_WELCOME_BODY;
   // 追加入力用の空行を3つ確保
   const rows = [...plans, ...Array(3).fill(null)].slice(0, Math.max(plans.length + 2, 4));
 
@@ -102,6 +106,23 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
             <label className="block">
               <div className="label mb-1">規約バージョン</div>
               <input name="termsVersion" defaultValue={policy.termsVersion} className="input" />
+            </label>
+          </section>
+
+          {/* 登録完了メール (利用者宛) */}
+          <section className="card p-4 space-y-3">
+            <h2 className="font-semibold text-navy text-sm">登録完了メール(利用者へ送信)</h2>
+            <p className="text-[11px] text-muted">
+              申込完了直後に利用者のメールへ送ります(差出人は SMTP_FROM = 弊社アドレス)。使えるプレースホルダ:
+              <span className="font-mono"> {"{name} {accountId} {planName} {amount} {serviceStartDate} {chargeStartDate}"}</span>
+            </p>
+            <label className="block">
+              <div className="label mb-1">件名</div>
+              <input name="welcome_subject" defaultValue={welcomeSubject} className="input w-full" />
+            </label>
+            <label className="block">
+              <div className="label mb-1">本文</div>
+              <textarea name="welcome_body" defaultValue={welcomeBody} rows={12} className="input w-full font-mono text-xs leading-relaxed" />
             </label>
           </section>
 

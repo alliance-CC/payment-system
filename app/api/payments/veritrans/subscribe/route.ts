@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { registerSubscription } from "@/features/payments/billing";
-import { getBillingPolicy } from "@/features/payments/billing-config";
+import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { createSupabaseService } from "@/shared/db/service";
 import { rateLimit, clientIpOf } from "@/shared/utils/rateLimit";
 
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   }
   const body = await req.json().catch(() => ({}));
-  const { planId, name, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug } = body ?? {};
+  const { planId, name, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate } = body ?? {};
 
   if (!consentAccepted) {
     return NextResponse.json({ error: "consent-required" }, { status: 400 });
@@ -30,6 +30,11 @@ export async function POST(req: Request) {
   if (!nameStr || !phoneStr) {
     return NextResponse.json({ error: "name-and-phone-required" }, { status: 400 });
   }
+  // メールは必須 (登録完了メールの送信先 §②)
+  const emailStr = String(email ?? "").trim();
+  if (!emailStr || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailStr)) {
+    return NextResponse.json({ error: "email-required" }, { status: 400 });
+  }
 
   // OEM: テナント slug → id 解決 (公開ページなので service role で slug のみ検索)
   let tenantId: string | null = null;
@@ -40,7 +45,7 @@ export async function POST(req: Request) {
     tenantId = data.id as string;
   }
 
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
 
   const result = await registerSubscription({
@@ -48,11 +53,12 @@ export async function POST(req: Request) {
     planId: String(planId ?? ""),
     name: nameStr.slice(0, 100),
     phone: phoneStr.slice(0, 30),
-    email: email ? String(email).slice(0, 200) : null,
+    email: emailStr.slice(0, 200),
     paymentMethod: "card",
     token,
     tokenKey: tokenKey ? String(tokenKey) : null,
     caseId: caseId ? String(caseId).slice(0, 100) : null,
+    serviceStartDate: serviceStartDate ? String(serviceStartDate).slice(0, 10) : null,
     consent: {
       termsVersion: policy.termsVersion,
       ip,

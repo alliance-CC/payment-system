@@ -14,7 +14,7 @@ import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
-  insertConsent, type ContractRow,
+  insertConsent, updateServiceStartDate, type ContractRow,
 } from "./store";
 import {
   loadBillingPolicy, DEFAULT_TENANT_ID,
@@ -35,6 +35,7 @@ export type SubscribeInput = {
   token: string;
   tokenKey?: string | null;
   caseId?: string | null;           // 申込リンク ?case=案件ID (§5 照合精度向上)
+  serviceStartDate?: string | null; // 利用開始日 (YYYY-MM-DD)。2ヶ月無料の起点。既定=申込月の翌月1日
   consent: { termsVersion: string; ip?: string | null; userAgent?: string | null };
 };
 
@@ -114,6 +115,8 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   const freeMonths = policy.freeMonths;
   const useFreePeriod = freeMonths > 0;
   const today = todayJst();
+  // 利用開始日 (申込時に選択・§①)。既定=申込月の翌月1日。2ヶ月無料の起点。
+  const serviceStart = normalizeDate(input.serviceStartDate) ?? firstChargeDate(today, 1);
 
   // orderId は acct_YYYYMM を基本に、申込試行番号 (=同意記録の件数) で一意化する (§5-②)。
   // 無料期間ありの登録取引は、無料期間後の初回課金 orderId (acct_初回課金YYYYMM) と衝突しない
@@ -157,8 +160,10 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   //   無料期間あり → 暦月課金 (anchor=1)・初回課金日 = 申込月+freeMonths の1日 (§規約 会費対象期間)
   //   無料期間なし → 従来どおり 翌月同日
   const anchorDay = useFreePeriod ? 1 : parseInt(today.slice(8, 10), 10);
+  // 無料期間あり: 初回課金日 = 利用開始月 + freeMonths の1日
+  //   (利用開始月=1ヶ月目・翌月=2ヶ月目まで無料 → 翌々月=3ヶ月目の1日から課金)
   const nextChargeDate = useFreePeriod
-    ? firstChargeDate(today, freeMonths)
+    ? firstChargeDate(serviceStart, freeMonths)
     : nextChargeDateAfter(monthOf(today), anchorDay);
   const contractStatus = indeterminate ? "suspended" : "active";
   const contractNextDate = indeterminate ? null : nextChargeDate;
@@ -194,6 +199,9 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
       free_key: customerId,
     });
   }
+
+  // 利用開始日を保存 (列 p001 未適用でも申込は失敗させない)。
+  await updateServiceStartDate(contract.id, serviceStart);
 
   // 初回課金の記録 (orderId 一意)。無料期間ありは申込時に課金していないため記録しない
   // — 初回の実課金は無料期間終了後 (初回課金日) に日次 Cron が行い、そこで charge 行が作られる。
@@ -257,7 +265,50 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
     name: input.name, phone: input.phone,
   }).catch(() => { /* シート追記失敗で申込は失敗させない */ });
 
+  // 利用者への登録完了メール (§②)。件名/本文は管理画面 (/admin/settings) で編集。
+  // 弊社アドレス (SMTP_FROM) から利用者のメールへ。カード等の決済個人情報は含めない。
+  if (input.email) {
+    await sendWelcomeEmail(tenantId, {
+      to: input.email,
+      name: input.name,
+      accountId,
+      planName: plan.name,
+      amount: plan.amount,
+      serviceStartDate: serviceStart,
+      chargeStartDate: nextChargeDate,
+    }).catch((e) => console.error("[payments] welcome mail failed:", String(e?.message ?? e)));
+  }
+
   return { ok: true, accountId, orderId, nextChargeDate };
+}
+
+// YYYY-MM-DD の妥当性チェック (不正なら null)。
+function normalizeDate(s?: string | null): string | null {
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? null : s;
+}
+
+// 利用者への登録完了メール。テンプレート(件名/本文)は設定で編集可・プレースホルダ置換。
+async function sendWelcomeEmail(
+  tenantId: string,
+  v: { to: string; name: string; accountId: string; planName: string; amount: number; serviceStartDate: string; chargeStartDate: string },
+): Promise<void> {
+  const { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } = await import("./payment-settings");
+  const s = await loadPaymentSettings();
+  const subjTpl = s.welcomeEmail?.subject || DEFAULT_WELCOME_SUBJECT;
+  const bodyTpl = s.welcomeEmail?.body || DEFAULT_WELCOME_BODY;
+  const map: Record<string, string> = {
+    name: v.name,
+    accountId: v.accountId,
+    planName: v.planName,
+    amount: v.amount.toLocaleString(),
+    serviceStartDate: v.serviceStartDate,
+    chargeStartDate: v.chargeStartDate,
+  };
+  const fill = (t: string) => t.replace(/\{(\w+)\}/g, (_, k) => map[k] ?? `{${k}}`);
+  const res = await sendEmailViaSmtp({ to: v.to, subject: fill(subjTpl), body: fill(bodyTpl) }, tenantId);
+  if (!res.ok) console.error("[payments] welcome mail send failed:", (res as any).error);
 }
 
 async function notifyRegistration(

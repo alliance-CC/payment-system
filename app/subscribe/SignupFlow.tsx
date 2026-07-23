@@ -20,6 +20,16 @@ function formatCardNumber(raw: string): string {
   return digits.replace(/(.{4})/g, "$1 ").trim();
 }
 
+// 既定のご利用開始日 = 申込月の翌月1日 (JST)。
+function defaultServiceStart(): string {
+  const now = new Date(Date.now() + 9 * 3600_000);
+  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return next.toISOString().slice(0, 10);
+}
+function isEmail(s: string): boolean {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.trim());
+}
+
 export default function SignupFlow({
   plans, tokenApiKey, tokenUrl, configured, termsVersion, caseId, tenantSlug, initialPlanId,
 }: {
@@ -43,6 +53,7 @@ export default function SignupFlow({
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [serviceStart, setServiceStart] = useState(defaultServiceStart());
   const [method, setMethod] = useState<"card" | "bank">("card");
   const [number, setNumber] = useState("");
   const [expMonth, setExpMonth] = useState("");
@@ -68,7 +79,8 @@ export default function SignupFlow({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planId, name, phone, email: email || null,
+          planId, name, phone, email,
+          serviceStartDate: serviceStart,
           token: tok.token, tokenKey: tok.tokenKey,
           consentAccepted: agreed,
           caseId: caseId || null,
@@ -84,6 +96,8 @@ export default function SignupFlow({
           ? "決済結果の確認に時間がかかっています。恐れ入りますが、再度お申し込みはせず、お電話にてお問い合わせください"
           : json?.error === "too-many-requests"
           ? "アクセスが集中しています。しばらく待ってから再度お試しください"
+          : json?.error === "email-required"
+          ? "メールアドレスをご入力ください"
           : `お申し込みに失敗しました${code}`;
         // 検証時の原因特定用: VeriTrans の詳細メッセージがあれば併記
         setError(json?.vtDetail ? `${msg}\n詳細: ${json.vtDetail}` : msg);
@@ -126,7 +140,7 @@ export default function SignupFlow({
   const canNext =
     step === 0 ? !!plan :
     step === 1 ? agreed :
-    step === 2 ? name.trim() !== "" && phone.trim() !== "" :
+    step === 2 ? name.trim() !== "" && phone.trim() !== "" && isEmail(email) && !!serviceStart :
     true;
 
   // プラン確定 (LP 由来) 時は プラン選択ステップ(0) を隠す。最小ステップは 1
@@ -207,7 +221,7 @@ export default function SignupFlow({
         </div>
       )}
 
-      {/* 3. 氏名・電話 (§1.1-3)。メールは任意 (取得要否 §10 未確定のため必須にしない) */}
+      {/* 3. 氏名・電話・メール(必須)・ご利用開始日 (§①②) */}
       {step === 2 && (
         <div className="space-y-3">
           <div>
@@ -221,10 +235,18 @@ export default function SignupFlow({
               onChange={(e) => setPhone(e.target.value)} placeholder="09012345678" required />
           </div>
           <div>
-            <div className="label">メールアドレス (任意)</div>
+            <div className="label">メールアドレス *</div>
             <input className="input w-full" type="email" autoComplete="email" value={email}
-              onChange={(e) => setEmail(e.target.value)} placeholder="taro@example.com" />
-            <p className="text-[10px] text-muted mt-1">カード期限切れ時のご案内などに使用します</p>
+              onChange={(e) => setEmail(e.target.value)} placeholder="taro@example.com" required />
+            <p className="text-[10px] text-muted mt-1">登録完了メール・各種ご案内をお送りします</p>
+          </div>
+          <div>
+            <div className="label">ご利用開始日 *</div>
+            <input className="input w-full" type="date" value={serviceStart}
+              onChange={(e) => setServiceStart(e.target.value)} required />
+            <p className="text-[10px] text-muted mt-1">
+              ご利用開始月とその翌月は無料。翌々月（3ヶ月目）から月額のお支払いが始まります。
+            </p>
           </div>
         </div>
       )}

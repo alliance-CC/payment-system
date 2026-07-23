@@ -25,12 +25,36 @@ export type ContractRow = {
   contact_phone: string | null;
   contact_email: string | null;
   free_key: string | null;
+  /** 利用開始日 (2ヶ月無料の起点)。列 p001 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
+  service_start_date?: string | null;
 };
 
 const CONTRACT_COLS =
   "id, tenant_id, account_id, customer_id, deal_id, plan_id, plan_name, amount, payment_method, status, " +
   "started_at, anchor_day, next_charge_date, consecutive_failures, last_result_code, last_charged_at, " +
   "contact_name, contact_phone, contact_email, free_key";
+
+/** 利用開始日をベストエフォートで保存 (列 p001 未適用でも申込を失敗させない)。 */
+export async function updateServiceStartDate(id: string, date: string | null): Promise<void> {
+  try {
+    const service = createSupabaseService();
+    await service.from("payment_contracts").update({ service_start_date: date }).eq("id", id);
+  } catch { /* 列が無ければ黙って無視 (管理表示は申込日から推定) */ }
+}
+
+/** contract_id → 利用開始日 のマップをベストエフォートで取得 (列 p001 未適用なら空)。 */
+export async function getServiceStartMap(ids: string[]): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (!ids.length) return map;
+  try {
+    const service = createSupabaseService();
+    const { data, error } = await service
+      .from("payment_contracts").select("id, service_start_date").in("id", ids);
+    if (error) return map;
+    for (const r of data ?? []) map.set((r as any).id, (r as any).service_start_date ?? null);
+  } catch { /* 列が無ければ空マップ */ }
+  return map;
+}
 
 export async function insertContract(row: {
   tenant_id: string;

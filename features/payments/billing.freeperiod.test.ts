@@ -105,6 +105,7 @@ vi.mock("./store", () => ({
     const c = mem.charges.find((x) => x.id === id); return c && c.ok === null ? c : null;
   },
   insertConsent: async (row: any) => { mem.consents.push(row); },
+  updateServiceStartDate: async (_id: string, _date: string | null) => { /* 列 p001 のベストエフォート保存 (テストでは no-op) */ },
 }));
 
 vi.mock("./crm-adapter", () => ({
@@ -187,17 +188,27 @@ describe("② 無料期間 (2ヶ月・申込月含む) — 申込時は登録の
     // revenue の課金記録は作らない (申込時は無料)
     expect(mem.charges).toHaveLength(0);
 
-    // 契約: active・暦月課金 (anchor=1)・初回課金日 = firstChargeDate(today,2)
-    const expectedFirst = firstChargeDate(todayJst(), 2);
+    // 契約: active・暦月課金 (anchor=1)・初回課金日 = 利用開始日(既定=翌月1日) + 2ヶ月の1日
+    const defaultServiceStart = firstChargeDate(todayJst(), 1);           // 既定利用開始日=翌月1日
+    const expectedFirst = firstChargeDate(defaultServiceStart, 2);
     expect(mem.contracts).toHaveLength(1);
     expect(mem.contracts[0]).toMatchObject({ status: "active", anchor_day: 1, next_charge_date: expectedFirst });
     expect(res.nextChargeDate).toBe(expectedFirst);
-    // 初回課金日は「2ヶ月先の1日」
+    // 初回課金日は「利用開始月から2ヶ月先の1日」
     expect(res.nextChargeDate).toMatch(/^\d{4}-\d{2}-01$/);
 
-    // CRM へ active 反映 + 申込シート追記
+    // CRM へ active 反映 + 申込シート追記 + 利用者への完了メール
     expect(mem.crmUpdates.some((u) => u.state.status === "active")).toBe(true);
     expect(mem.sheetRows).toHaveLength(1);
+    expect(mem.emails.some((m) => m.to === "taro@example.com")).toBe(true); // 登録完了メール(利用者宛)
+  });
+
+  it("① 利用開始日を指定するとその月+2ヶ月の1日が初回課金日 (2026-05-01 → 2026-07-01)", async () => {
+    const res = await billing.registerSubscription({ ...baseInput(), serviceStartDate: "2026-05-01" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.nextChargeDate).toBe("2026-07-01");           // 5月利用開始 → 5・6月無料 → 7月課金
+    expect(mem.contracts[0].next_charge_date).toBe("2026-07-01");
   });
 
   it("無料期間中は日次 Cron の課金対象にならない (初回課金日が未来)", async () => {
