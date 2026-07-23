@@ -1,0 +1,152 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Branding variables ────────────────────────────────────────
+   既定のブランドカラー (DEFAULT_BRANDING と同値)。
+   認証後は app/(workspace)/layout.tsx がテナントの色で上書きする。 */
+:root {
+  /* Memoreal v2 palette: deep indigo × vivid violet (PR #6 デザイン準拠) */
+  --branding-primary: #312E81;
+  --branding-accent: #7C3AED;
+  --brand-primary-rgb: 49 46 129;
+  --brand-primary-light-rgb: 79 70 229;
+  --brand-accent-rgb: 124 58 237;
+  --brand-accent-light-rgb: 139 92 246;
+}
+
+/* ─── Base ─────────────────────────────────────────────────────── */
+html, body {
+  /* 近未来(長時間向け): シルバーホワイト + ごく微かなブルーのラジアルグロウ */
+  background:
+    radial-gradient(1200px 600px at 100% -10%, rgb(var(--brand-accent-rgb) / 0.045), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgb(var(--brand-primary-rgb) / 0.05), transparent 55%),
+    #E9EDF4;
+  background-attachment: fixed;
+  color: #232B36;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* フォントアンチエイリアス */
+* { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+/* ─── Keyframes ─────────────────────────────────────────────────── */
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0)    scale(1); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes tabAppear {
+  from { opacity: 0; transform: translateX(-6px) scale(0.95); }
+  to   { opacity: 1; transform: translateX(0)    scale(1); }
+}
+
+.anim-slide-down  { animation: slideDown    0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+.anim-slide-up    { animation: slideUp      0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+.anim-fade-in     { animation: fadeIn       0.15s ease-out; }
+.anim-scale-in    { animation: scaleIn      0.18s cubic-bezier(0.16, 1, 0.3, 1); }
+.anim-slide-right { animation: slideInRight 0.2s  cubic-bezier(0.16, 1, 0.3, 1); }
+.anim-tab         { animation: tabAppear    0.2s  cubic-bezier(0.16, 1, 0.3, 1); }
+
+/* ─── Component tokens ─────────────────────────────────────────── */
+@layer components {
+  .card {
+    @apply bg-white border border-border rounded-xl shadow-card
+           transition-shadow duration-200;
+  }
+  .card-hover {
+    @apply card hover:shadow-md hover:-translate-y-px cursor-pointer
+           transition-all duration-200;
+  }
+  /* 近未来パネル: シルバー縁 + 上辺ハイライト + 微グラデ。ログイン/主要パネルで使用 */
+  .panel-future {
+    @apply relative rounded-2xl border border-silver/70 bg-white/90 backdrop-blur-sm
+           shadow-[0_10px_40px_rgba(15,40,90,0.12)] overflow-hidden;
+  }
+  .panel-future::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px;
+    background: linear-gradient(90deg, transparent, rgb(var(--brand-accent-rgb) / 0.55), transparent);
+  }
+  .panel-future::after {
+    content: "";
+    @apply pointer-events-none absolute inset-0;
+    background: linear-gradient(180deg, rgba(231,238,247,0.5), transparent 38%);
+  }
+
+  .btn {
+    @apply inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border
+           bg-white text-ink text-sm font-medium
+           hover:border-navy/30 hover:bg-navy/5
+           active:scale-[0.97] active:shadow-none
+           transition-all duration-150 select-none cursor-pointer;
+  }
+  .btn-primary {
+    @apply bg-navy text-white border-navy hover:bg-navyL
+           active:bg-navy/90;
+  }
+  .btn-gold    { @apply bg-accent text-white border-accent hover:bg-accent2 hover:border-accent2; }
+  .btn-danger  { @apply border-bad/40 text-bad hover:bg-bad/5; }
+
+  .input {
+    @apply w-full bg-white border border-border rounded-lg px-3 py-2
+           text-sm text-ink placeholder:text-muted
+           outline-none
+           focus:border-navy/60 focus:ring-2 focus:ring-navy/10
+           hover:border-navy/30
+           transition-all duration-150;
+  }
+
+  .label { @apply text-xs font-medium text-muted uppercase tracking-wider; }
+
+  .chip       { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border border-border bg-bg text-muted; }
+  .chip-navy  { @apply border-navy/30  bg-navy/5  text-navy; }
+  .chip-gold  { @apply border-accent/40 bg-accent/10 text-accent; }
+  .chip-good  { @apply border-good/40  bg-good/5  text-good; }
+  .chip-bad   { @apply border-bad/40   bg-bad/5   text-bad; }
+
+  .kbd { @apply px-1.5 py-0.5 rounded text-[10px] bg-bg border border-border font-mono; }
+  .skeleton { @apply animate-pulse bg-border rounded; }
+
+  /* ドロップダウン共通 */
+  .dropdown-panel {
+    @apply absolute bg-white rounded-xl shadow-lg border border-border py-1.5 z-40
+           anim-slide-down;
+  }
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E0; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #A0AEC0; }
+
+/* ─── Focus visible ──────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid rgb(var(--brand-accent-rgb) / 0.6);
+  outline-offset: 2px;
+}
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ─── Page transition ────────────────────────────────────────────── */
+main > * {
+  animation: fadeIn 0.12s ease-out;
+}

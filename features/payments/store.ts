@@ -1,0 +1,258 @@
+// 決済モジュールの永続化層 (payment_contracts / payment_charges / payment_consents)。
+// 公開申込・Cron は認証セッションを持たないため service_role で書き込む。
+// テナント境界は必ず tenant_id 条件で強制すること (RLS バイパスのため)。
+import "server-only";
+import { createSupabaseService } from "@/shared/db/service";
+
+export type ContractRow = {
+  id: string;
+  tenant_id: string;
+  account_id: string;
+  customer_id: string | null;
+  deal_id: string | null;
+  plan_id: string;
+  plan_name: string | null;
+  amount: number;
+  payment_method: "card" | "bank";
+  status: "active" | "delinquent" | "suspended" | "canceled" | "card_expired";
+  started_at: string;
+  anchor_day: number;
+  next_charge_date: string | null;
+  consecutive_failures: number;
+  last_result_code: string | null;
+  last_charged_at: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  contact_email: string | null;
+  free_key: string | null;
+};
+
+const CONTRACT_COLS =
+  "id, tenant_id, account_id, customer_id, deal_id, plan_id, plan_name, amount, payment_method, status, " +
+  "started_at, anchor_day, next_charge_date, consecutive_failures, last_result_code, last_charged_at, " +
+  "contact_name, contact_phone, contact_email, free_key";
+
+export async function insertContract(row: {
+  tenant_id: string;
+  account_id: string;
+  customer_id?: string | null;
+  plan_id: string;
+  plan_name?: string | null;
+  amount: number;
+  payment_method: "card" | "bank";
+  anchor_day: number;
+  next_charge_date: string | null;   // 結果不明で作成する契約は null (自動課金対象外)
+  status?: "active" | "delinquent" | "suspended" | "canceled" | "card_expired";
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  contact_email?: string | null;
+  free_key?: string | null;
+}): Promise<ContractRow> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_contracts")
+    .insert(row)
+    .select(CONTRACT_COLS)
+    .single();
+  if (error) throw new Error(`payment_contracts insert failed: ${error.message}`);
+  return data as ContractRow;
+}
+
+export async function getContractByAccountId(accountId: string): Promise<ContractRow | null> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_contracts")
+    .select(CONTRACT_COLS)
+    .eq("account_id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(`payment_contracts select failed: ${error.message}`);
+  return (data as ContractRow) ?? null;
+}
+
+export async function updateContractRow(
+  id: string,
+  patch: Partial<
+    Pick<
+      ContractRow,
+      | "status" | "next_charge_date" | "consecutive_failures" | "last_result_code"
+      | "last_charged_at" | "customer_id" | "deal_id" | "amount" | "plan_id" | "plan_name"
+    >
+  > & { canceled_at?: string | null },
+): Promise<void> {
+  const service = createSupabaseService();
+  const { error } = await service.from("payment_contracts").update(patch).eq("id", id);
+  if (error) throw new Error(`payment_contracts update failed: ${error.message}`);
+}
+
+/** 課金対象 (次回課金日 ≤ 対象日 かつ 契約中/延滞) を抽出 (§5-②) */
+export async function listDueContracts(dueDate: string, limit: number): Promise<ContractRow[]> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_contracts")
+    .select(CONTRACT_COLS)
+    .in("status", ["active", "delinquent"])
+    .lte("next_charge_date", dueDate)
+    .order("next_charge_date", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`payment_contracts due query failed: ${error.message}`);
+  return (data ?? []) as ContractRow[];
+}
+
+// ---- 課金試行ログ (orderId べき等 §5-②) ----
+
+export type ChargeRow = {
+  id: string;
+  order_id: string;
+  charge_month: string;
+  kind: "initial" | "recurring" | "retry";
+  attempt: number;
+  amount: number;
+  ok: boolean | null;
+  v_result_code: string | null;
+};
+
+/** 対象月の成功課金が既に存在するか (二重課金ガードの1段目) */
+export async function hasSuccessfulCharge(contractId: string, chargeMonth: string): Promise<boolean> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id")
+    .eq("contract_id", contractId)
+    .eq("charge_month", chargeMonth)
+    .eq("ok", true)
+    .limit(1);
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
+/** 対象月に「結果未確定 (ok=null)」の試行が残っているか。
+ *  VT 呼び出し成功後・記録前にクラッシュした可能性があり、再課金すると二重課金の
+ *  恐れがある → 呼び出し側はスキップして手動照合 (VT 取引照会) に回す。 */
+export async function hasInDoubtAttempt(contractId: string, chargeMonth: string): Promise<boolean> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id")
+    .eq("contract_id", contractId)
+    .eq("charge_month", chargeMonth)
+    .is("ok", null)
+    .limit(1);
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
+/** 対象月の試行回数 (リトライの orderId 採番に使用) */
+export async function countAttempts(contractId: string, chargeMonth: string): Promise<number> {
+  const service = createSupabaseService();
+  const { count, error } = await service
+    .from("payment_charges")
+    .select("id", { count: "exact", head: true })
+    .eq("contract_id", contractId)
+    .eq("charge_month", chargeMonth);
+  if (error) throw new Error(`payment_charges count failed: ${error.message}`);
+  return count ?? 0;
+}
+
+/**
+ * 課金試行を orderId 一意制約つきで記録する。
+ * 呼び出しは「API 実行前に insert (ok=null)」→「結果で update」の順。
+ * insert が unique violation なら同じ orderId が処理済み/処理中 → スキップ (べき等)。
+ */
+export async function beginChargeAttempt(row: {
+  tenant_id: string;
+  contract_id: string;
+  order_id: string;
+  charge_month: string;
+  kind: "initial" | "recurring" | "retry";
+  attempt: number;
+  amount: number;
+}): Promise<{ id: string } | "duplicate"> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .insert(row)
+    .select("id")
+    .single();
+  if (error) {
+    if (error.code === "23505") return "duplicate"; // unique_violation
+    throw new Error(`payment_charges insert failed: ${error.message}`);
+  }
+  return { id: (data as any).id };
+}
+
+export async function finishChargeAttempt(
+  id: string,
+  result: { ok: boolean; mstatus: string | null; v_result_code: string | null; error?: string | null },
+): Promise<void> {
+  const service = createSupabaseService();
+  const { error } = await service.from("payment_charges").update(result).eq("id", id);
+  if (error) throw new Error(`payment_charges update failed: ${error.message}`);
+}
+
+/** mstatus="pending" (保留) の試行: ok は null のまま経過だけ記録する。
+ *  在疑義として扱われ、当月の再課金は止まる (手動確定 resolveInDoubtCharge で解消)。 */
+export async function markChargePending(
+  id: string,
+  info: { mstatus: string | null; v_result_code: string | null },
+): Promise<void> {
+  const service = createSupabaseService();
+  const { error } = await service.from("payment_charges").update(info).eq("id", id);
+  if (error) throw new Error(`payment_charges update failed: ${error.message}`);
+}
+
+export async function getContractById(id: string): Promise<ContractRow | null> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_contracts")
+    .select(CONTRACT_COLS)
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(`payment_contracts select failed: ${error.message}`);
+  return (data as ContractRow | null) ?? null;
+}
+
+/** 在疑義 (ok=null) の課金試行1件を取得する (手動確定用) */
+export async function getInDoubtCharge(chargeId: string): Promise<
+  | { id: string; tenant_id: string; contract_id: string; order_id: string; charge_month: string; amount: number }
+  | null
+> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id, tenant_id, contract_id, order_id, charge_month, amount, ok")
+    .eq("id", chargeId)
+    .maybeSingle();
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  if (!data || (data as any).ok !== null) return null;   // 在疑義でない行は対象外
+  return data as any;
+}
+
+/** account_id に紐づく同意記録の件数 (初回課金 orderId の試行番号に使用)。
+ *  申込のたびに同意を先に保存するため「これまでの申込試行回数」に一致する。 */
+export async function countConsentsForAccount(accountId: string): Promise<number> {
+  const service = createSupabaseService();
+  const { count, error } = await service
+    .from("payment_consents")
+    .select("id", { count: "exact", head: true })
+    .eq("account_id", accountId);
+  if (error) throw new Error(`payment_consents count failed: ${error.message}`);
+  return count ?? 0;
+}
+
+// ---- 同意ログ (§1.1-2) ----
+
+export async function insertConsent(row: {
+  tenant_id: string;
+  contract_id?: string | null;
+  account_id?: string | null;
+  terms_version: string;
+  plan_id?: string | null;
+  payment_method?: string | null;
+  ip?: string | null;
+  user_agent?: string | null;
+}): Promise<void> {
+  const service = createSupabaseService();
+  const { error } = await service.from("payment_consents").insert(row);
+  // 同意ログの失敗で申込全体は止めない (呼び出し側でログして続行してよい)
+  if (error) throw new Error(`payment_consents insert failed: ${error.message}`);
+}
