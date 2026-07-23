@@ -12,12 +12,35 @@ export type PaymentSettings = {
   retryMax: number;                      // リトライ上限
   cardExpiredCodes: string[];            // カード期限切れ判定コード(プレフィックス)
   cronBatchLimit: number;                // 1回のCronの最大処理数
-  notifyEmail: string | null;            // 申込通知先メール
+  notifyEmail: string | null;            // 申込通知先メール(自社宛)
   termsVersion: string;                  // 規約バージョン
   cancelPolicy: "end_of_month" | "immediate"; // 解約: 当月末まで利用可(翌月停止) / 即時停止
+  // 利用者への登録完了メール(件名/本文)。プレースホルダ {name}{accountId}{planName}{amount}{serviceStartDate}{chargeStartDate}
+  welcomeEmail?: { subject: string; body: string };
 };
 
 const PROVIDER = "payment_settings";
+
+// 登録完了メールの既定テンプレート (管理画面で上書き可)。プレースホルダは
+// {name}{accountId}{planName}{amount}{serviceStartDate}{chargeStartDate}。
+export const DEFAULT_WELCOME_SUBJECT =
+  "【{planName}】お申し込みありがとうございます (会員ID: {accountId})";
+export const DEFAULT_WELCOME_BODY = [
+  "{name} 様",
+  "",
+  "この度は「{planName}」にお申し込みいただき、誠にありがとうございます。",
+  "お申し込みが完了しました。",
+  "",
+  "■ 会員ID: {accountId}",
+  "■ プラン: {planName}（月額 {amount} 円 / 税込）",
+  "■ 利用開始日: {serviceStartDate}",
+  "■ 課金開始日: {chargeStartDate}（それまでは無料期間です）",
+  "",
+  "会員IDはお問い合わせの際に必要です。大切に保管ください。",
+  "",
+  "――――――――――――――",
+  "本メールにお心当たりのない場合は破棄してください。",
+].join("\n");
 
 function dbReady(): boolean {
   return !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);

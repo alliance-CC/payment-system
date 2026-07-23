@@ -65,6 +65,10 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     notifyEmail: String(formData.get("notifyEmail") ?? "").trim() || null,
     termsVersion: String(formData.get("termsVersion") ?? "").trim() || "draft-2026-07",
     cancelPolicy: String(formData.get("cancelPolicy")) === "immediate" ? "immediate" : "end_of_month",
+    welcomeEmail: {
+      subject: String(formData.get("welcome_subject") ?? "").trim(),
+      body: String(formData.get("welcome_body") ?? "").trim(),
+    },
   };
   const res = await savePaymentSettings(settings);
   redirect(`/admin/settings?saved=${res.ok ? "1" : "0"}`);

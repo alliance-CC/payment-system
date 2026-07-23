@@ -1,5 +1,6 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
+import { getServiceStartMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
@@ -48,6 +49,9 @@ export async function loadBoard(opts: { month: string; status?: string }): Promi
   const rowsRaw = contracts ?? [];
   const ids = rowsRaw.map((c: any) => c.id);
 
+  // 利用開始日 (選択値。列 p001 未適用なら空 → 申込日から推定)
+  const ssMap = await getServiceStartMap(ids);
+
   // 同意記録の有無 (account_id 単位)
   const { data: consents } = await svc.from("payment_consents").select("account_id");
   const consentSet = new Set((consents ?? []).map((c: any) => c.account_id));
@@ -69,9 +73,13 @@ export async function loadBoard(opts: { month: string; status?: string }): Promi
 
   const rows: RegistrantRow[] = rowsRaw.map((c: any) => {
     const applied = jstDate(c.started_at);
-    const serviceStart = applied ? firstChargeDate(applied, 1) : "";                 // 翌月1日
-    const chargeStart = applied
-      ? (policy.freeMonths > 0 ? firstChargeDate(applied, policy.freeMonths) : applied)
+    // 利用開始日: 選択値があればそれ、無ければ申込日の翌月1日を推定
+    const chosen = ssMap.get(c.id) || null;
+    const serviceStart = chosen ?? (applied ? firstChargeDate(applied, 1) : "");
+    // 課金開始日: 利用開始日 + freeMonths の1日 (無料期間0なら利用開始日)
+    const chargeBasis = chosen ?? applied;
+    const chargeStart = chargeBasis
+      ? (policy.freeMonths > 0 ? firstChargeDate(chargeBasis, policy.freeMonths) : chargeBasis)
       : "";
     const canceledAt = c.canceled_at ? jstDate(c.canceled_at) : null;
 
