@@ -114,7 +114,7 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
       serviceStart,
       chargeStart,
       canceledAt,
-      paymentMethod: c.payment_method === "bank" ? "口座振替" : "クレジットカード",
+      paymentMethod: "クレジットカード",
       statusLabel,
       rawStatus: c.status,
       name: c.contact_name,

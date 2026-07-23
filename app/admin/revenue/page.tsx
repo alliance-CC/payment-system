@@ -10,21 +10,14 @@ export const metadata = { title: "売上予測 | Memoreal Payments" };
 
 const yen = (n: number) => "¥" + n.toLocaleString();
 
-const METHODS = [
-  { key: "all", label: "すべて" },
-  { key: "card", label: "クレジットカード" },
-  { key: "bank", label: "口座振替" },
-] as const;
-
 export default async function RevenuePage({
   searchParams,
 }: {
-  searchParams: { month?: string; method?: string };
+  searchParams: { month?: string };
 }) {
   requireAdmin();
   const month = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : todayJst().slice(0, 7);
-  const method = (["all", "card", "bank"].includes(searchParams.method ?? "") ? searchParams.method : "all") as "all" | "card" | "bank";
-  const b = await loadRevenue({ month, method });
+  const b = await loadRevenue({ month });
 
   return (
     <main className="min-h-screen bg-bg p-4 sm:p-6">
@@ -40,35 +33,28 @@ export default async function RevenuePage({
           </div>
         </header>
 
-        {/* 月・支払方法 */}
+        {/* 月 */}
         <div className="card p-4 flex flex-wrap items-center gap-4">
           <form method="get" className="flex items-end gap-2">
             <div>
               <div className="label mb-1">対象月</div>
               <input type="month" name="month" defaultValue={month} className="input" />
             </div>
-            <input type="hidden" name="method" value={method} />
             <button className="btn btn-primary">表示</button>
           </form>
-          <div className="flex flex-wrap gap-1.5">
-            {METHODS.map((m) => (
-              <Link key={m.key} href={`/admin/revenue?month=${month}&method=${m.key}`}
-                className={"chip " + (method === m.key ? "chip-navy" : "hover:border-navy/40")}>{m.label}</Link>
-            ))}
-          </div>
         </div>
 
         {/* 当月サマリ */}
         <div className="grid sm:grid-cols-3 gap-3">
           <div className="card p-4">
             <div className="text-xs text-muted">当月 売上予定 ({month})</div>
-            <div className="text-2xl font-bold text-navy mt-1">{yen(b.monthProjected.total)}</div>
-            <div className="text-[11px] text-muted mt-1">カード {yen(b.monthProjected.card)} / 口座 {yen(b.monthProjected.bank)}</div>
+            <div className="text-2xl font-bold text-navy mt-1">{yen(b.monthProjected)}</div>
+            <div className="text-[11px] text-muted mt-1">継続課金の見込み(クレジットカード)</div>
           </div>
           <div className="card p-4">
             <div className="text-xs text-muted">当月 売上確定 ({month})</div>
-            <div className="text-2xl font-bold text-good mt-1">{yen(b.monthConfirmed.total)}</div>
-            <div className="text-[11px] text-muted mt-1">カード {yen(b.monthConfirmed.card)} / 口座 {yen(b.monthConfirmed.bank)}</div>
+            <div className="text-2xl font-bold text-good mt-1">{yen(b.monthConfirmed)}</div>
+            <div className="text-[11px] text-muted mt-1">課金成功済みの金額</div>
           </div>
           <div className="card p-4">
             <div className="text-xs text-muted">当月 利用者数</div>
@@ -87,20 +73,18 @@ export default async function RevenuePage({
                 <th className="px-3 py-2 font-medium">お客様</th>
                 <th className="px-3 py-2 font-medium">プラン</th>
                 <th className="px-3 py-2 font-medium">月額</th>
-                <th className="px-3 py-2 font-medium">支払方法</th>
                 <th className="px-3 py-2 font-medium">利用状況</th>
                 <th className="px-3 py-2 font-medium">当月課金</th>
               </tr>
             </thead>
             <tbody>
-              {b.users.length === 0 && <tr><td colSpan={7} className="px-3 py-8 text-center text-muted">対象の利用者がいません</td></tr>}
+              {b.users.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-muted">対象の利用者がいません</td></tr>}
               {b.users.map((u) => (
                 <tr key={u.accountId} className="border-b border-border/60">
                   <td className="px-3 py-2 font-mono text-xs">{u.accountId}</td>
                   <td className="px-3 py-2">{u.name ?? "-"}</td>
                   <td className="px-3 py-2">{u.planName}</td>
                   <td className="px-3 py-2">{yen(u.amount)}</td>
-                  <td className="px-3 py-2 text-muted">{u.methodLabel}</td>
                   <td className="px-3 py-2"><span className={"chip " + (u.usageLabel === "利用中" ? "chip-good" : "chip-navy")}>{u.usageLabel}</span></td>
                   <td className="px-3 py-2">{u.billed ? <span className="chip chip-good">確定</span> : <span className="chip">予定</span>}</td>
                 </tr>

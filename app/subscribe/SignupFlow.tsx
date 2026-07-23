@@ -5,7 +5,7 @@
 import { useState } from "react";
 import {
   CreditCard, Loader2, CheckCircle2, AlertCircle, Lock,
-  Landmark, ChevronRight, ChevronLeft,
+  ChevronRight, ChevronLeft,
 } from "lucide-react";
 import { tokenizeCard } from "./tokenize";
 
@@ -56,7 +56,6 @@ export default function SignupFlow({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [serviceStart, setServiceStart] = useState(defaultServiceStart());
-  const [method, setMethod] = useState<"card" | "bank">("card");
   const [number, setNumber] = useState("");
   const [expMonth, setExpMonth] = useState("");
   const [expYear, setExpYear] = useState("");
@@ -257,24 +256,14 @@ export default function SignupFlow({
         </div>
       )}
 
-      {/* 4. 支払方法 (§1.1-4 / §2.1) + カード入力 */}
+      {/* 4. カード入力 (クレジットカードのみ) */}
       {step === 3 && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setMethod("card")} className={
-              "p-3 rounded-xl border text-sm flex items-center gap-2 justify-center transition-colors " +
-              (method === "card" ? "border-navy bg-navy/5 font-medium" : "border-border text-muted")
-            }>
-              <CreditCard size={15} />クレジットカード
-            </button>
-            {/* 口座振替はカードと別サービス・別フロー。仕様確定後に別系統で追加 (§2.1) */}
-            <button type="button" disabled className="p-3 rounded-xl border border-border text-sm flex items-center gap-2 justify-center text-muted/50 cursor-not-allowed">
-              <Landmark size={15} />口座振替 (準備中)
-            </button>
+          <div className="flex items-center gap-2 text-sm text-muted">
+            <CreditCard size={15} className="text-navy" />お支払いはクレジットカードです
           </div>
 
-          {method === "card" && (
-            <>
+          <>
               <div>
                 <div className="label flex items-center gap-1"><CreditCard size={13} />カード番号</div>
                 <input className="input w-full font-mono" inputMode="numeric" autoComplete="cc-number"
@@ -305,12 +294,11 @@ export default function SignupFlow({
                     maxLength={4} value={cvc} onChange={(e) => setCvc(e.target.value)} required />
                 </div>
               </div>
-            </>
-          )}
+          </>
 
           {plan && (
             <div className="text-xs text-muted bg-bg rounded-lg p-2.5">
-              お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()} (本日初回課金)
+              お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()}（利用開始月＋翌月は無料）
             </div>
           )}
         </div>
