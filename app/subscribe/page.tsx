@@ -1,6 +1,6 @@
 import { loadVeritransConfig, toPublicConfig } from "@/features/payments/veritrans/config";
-import { getPlans } from "@/features/payments/plans";
-import { getBillingPolicy } from "@/features/payments/billing-config";
+import { loadPlans } from "@/features/payments/plans";
+import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { resolveTenantIdBySlug } from "@/features/payments/tenant";
 import SignupFlow from "./SignupFlow";
 
@@ -19,8 +19,8 @@ export default async function SubscribePage({
   const tenantId = await resolveTenantIdBySlug(searchParams.tenant);
   const cfg = await loadVeritransConfig(tenantId);   // OEM: テナント別の token_api_key (§1.2)
   const pub = toPublicConfig(cfg);
-  const plans = getPlans().map((p) => ({ id: p.id, name: p.name, amount: p.amount }));
-  const policy = getBillingPolicy();
+  const plans = (await loadPlans()).map((p) => ({ id: p.id, name: p.name, amount: p.amount }));
+  const policy = await loadBillingPolicy();
   // LP でプランを選んで来た場合は見出しを「お手続き」に (プラン選択を促す文言を出さない)
   const planPreselected = !!(searchParams.plan && plans.some((p) => p.id === searchParams.plan));
 

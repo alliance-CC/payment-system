@@ -6,7 +6,7 @@
 import "server-only";
 import { loadVeritransConfig, type VeritransConfig } from "./veritrans/config";
 import { registerAndCharge, chargeByAccount, updateCardByToken, deleteAccount } from "./veritrans/paynowid";
-import { getPlan } from "./plans";
+import { loadPlan } from "./plans";
 import { newAccountId, accountIdFromCaseId, isValidAccountId } from "./account";
 import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
 import { appendSignupRow } from "./signup-sheet";
@@ -17,7 +17,7 @@ import {
   insertConsent, type ContractRow,
 } from "./store";
 import {
-  getBillingPolicy, DEFAULT_TENANT_ID,
+  loadBillingPolicy, DEFAULT_TENANT_ID,
   todayJst, monthOf, yyyymmOf, addDays, nextChargeDateAfter, recurringOrderId,
   firstChargeDate, endOfMonth,
 } from "./billing-config";
@@ -59,7 +59,7 @@ function extractVtDetail(raw: any): string | null {
 
 export async function registerSubscription(input: SubscribeInput): Promise<SubscribeResult> {
   const tenantId = input.tenantId || DEFAULT_TENANT_ID;
-  const plan = getPlan(input.planId);
+  const plan = await loadPlan(input.planId);
   if (!plan) return { ok: false, error: "unknown-plan" };
 
   const cfg = await loadVeritransConfig(tenantId);   // OEM: テナント別の VT アカウント (§1.2)
@@ -110,7 +110,7 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   //   無料期間 (freeMonths ヶ月・申込月含む) がある場合、申込時は「会員登録+カード登録」
   //   のみ行い課金しない (capture=false)。実課金は無料期間終了後の初回課金日に日次 Cron
   //   (会員ID都度決済) が行う。無料期間 0 のときは従来どおり申込時に初回課金する。
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   const freeMonths = policy.freeMonths;
   const useFreePeriod = freeMonths > 0;
   const today = todayJst();
@@ -264,7 +264,7 @@ async function notifyRegistration(
   tenantId: string,
   info: { accountId: string; planName: string; amount: number; name: string; phone: string; email: string | null; firstChargeDate?: string | null },
 ): Promise<void> {
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   if (!policy.notifyEmail) return;   // TODO(§10): 宛先確定後に必須化
   const body = [
     "継続課金の新規申込を受け付けました。",
@@ -310,7 +310,7 @@ export type DailyChargeSummary = {
 const CRON_TIME_BUDGET_MS = 240_000;
 
 export async function runDailyCharges(): Promise<DailyChargeSummary> {
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   const today = todayJst();
   const startedAt = Date.now();
   const summary: DailyChargeSummary = {
@@ -367,7 +367,7 @@ async function chargeContractOnce(
   today: string,
   cfg: VeritransConfig,
 ): Promise<"charged" | "failed" | "skipped" | "suspended" | "cardExpired" | "pending"> {
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   // 課金対象月は「予定されていた課金日」の年月 (リトライで日付が翌月にずれても対象月は維持…
   // はせず、予定日ベースで判定する。予定日が過去に溜まっていても1回の実行で1ヶ月分のみ課金)
   const dueDate = contract.next_charge_date ?? today;
@@ -514,7 +514,7 @@ async function chargeContractOnce(
 }
 
 async function notifyCardExpired(contract: ContractRow): Promise<void> {
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   // 自社宛の運用通知 (顧客宛の再登録依頼は §10 メール取得要否の確定後に自動化)
   if (!policy.notifyEmail) return;
   const body = [
@@ -607,9 +607,12 @@ export async function cancelSubscription(accountId: string): Promise<{ ok: boole
   if (!contract) return { ok: false, error: "contract-not-found" };
   if (contract.status === "canceled") return { ok: true };
 
-  // 退会手続き当月末日24時までサービス利用可 (§規約 有効期間3)。日割り返金なし=当月分は請求済み。
-  // 例: 5/15 解約 → 5月末まで利用可 / 6月から利用不可。
-  const effectiveUntil = endOfMonth(todayJst());
+  // 解約ポリシー (管理画面 /admin/settings):
+  //   end_of_month(既定) … 退会手続き当月末日24時まで利用可・翌月から停止 (§規約 有効期間3)
+  //   immediate          … 即時停止 (当日まで)
+  // いずれも次回課金は停止する (日割り返金なし=当月分は請求済み)。
+  const policy = await loadBillingPolicy();
+  const effectiveUntil = policy.cancelPolicy === "immediate" ? todayJst() : endOfMonth(todayJst());
 
   // VeriTrans 側の会員データ削除 (§6-7)。未設定/失敗でも自社側は解約状態にする
   // (完全削除の再実行は管理画面から可能なよう last_result_code に痕跡を残す)

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogOut, AlertTriangle, RefreshCw } from "lucide-react";
+import { LogOut, AlertTriangle, RefreshCw, Settings } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { todayJst } from "@/features/payments/billing-config";
@@ -56,6 +56,9 @@ export default async function AdminBoardPage({
           <div className="flex items-center gap-2">
             <Link href={`/admin?month=${month}&status=${status}`} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
+            </Link>
+            <Link href="/admin/settings" className="btn flex items-center gap-1">
+              <Settings size={14} />課金設定
             </Link>
             <form action={logoutAction}>
               <button className="btn flex items-center gap-1"><LogOut size={14} />ログアウト</button>
