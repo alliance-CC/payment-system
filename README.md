@@ -1,55 +1,70 @@
 # Memoreal Payments — 継続課金 決済アプリ
 
-CRM 本体から分離した、**公開の決済(継続課金)アプリ**。
-「ストック商材LP → 利用規約 → 決済登録(VeriTrans 4G) → CRM反映」を担う。
+**LPから申し込まれた後の「裏側」を担う決済システム + 登録者管理画面。**
+LP (別プロジェクト: `alliance-CC/kurashi-anshin-lp`) の申込ボタンが本アプリの
+`/subscribe?plan=…` (絶対URL) へ遷移してくる。
 
 ```
-LP (/lp) → /subscribe?plan=… → 会員登録+カード登録(無料期間中は課金なし)
-        → 無料期間終了後 日次Cronが会員ID都度決済 → CRM(payment_contracts等)へ反映
+LP (別プロジェクト) ──申込ボタン──▶ /subscribe?plan=…
+   ① プラン確認 → ② 利用規約+同意+氏名/電話 → ③ カード → 決済登録(VeriTrans 4G)
+   → 無料期間(既定2ヶ月・申込月含む)後、日次Cronが会員ID都度決済で毎月課金
+   → CRM(共有Supabase)へ反映 + alliance@lifeap.co へ申込通知
+
+トップ(/) ──▶ /admin 登録者管理ボード (パスワードログイン)
 ```
 
-## 構成 (CRM との関係)
+## 役割分担
 
-| | このアプリ (memoreal-payments) | CRM 本体 (Memoreal) |
-|---|---|---|
-| 面 | 公開: LP / 申込 / 規約 / 決済API / 課金Cron | 社内: 案件・顧客・レポート等 + 契約管理(/admin/payments) |
-| 認証 | 不要 (公開申込 + CRON_SECRET) | Supabase 認証 + RLS |
-| デプロイ | 独立 Vercel プロジェクト | 別 Vercel プロジェクト |
-| DB | **当面は CRM と同じ Supabase を共有** (将来 別プロジェクトへ) | 同左 |
-
-DB スキーマ(マイグレーション)は CRM 側リポジトリが管理する。本アプリは
-`payment_contracts` / `payment_charges` / `payment_consents` と、顧客照合用に
-`customers` / `deals` / `deal_customers` / `tenants` / `integrations` を service_role で読み書きする。
+| | このアプリ (payment-system) | LP (kurashi-anshin-lp) | CRM (Memolyze.app) |
+|---|---|---|---|
+| 面 | 申込/規約/決済API/課金Cron + **登録者管理画面** | 集客・商品訴求 | 社内の案件・顧客管理 |
+| トップ | `/admin` ログイン | LP本体 | CRMログイン |
+| DB | **当面CRMと同じSupabaseを共有** (将来分離) | なし | 同左 (スキーマ管理はCRM側) |
 
 ## ルート
 
-- `/lp` — ストック商材LP (`public/lp/index.html`)
-- `/subscribe` — 申込フロー(①プラン ②利用規約+同意+お客様情報 ③カード → 決済登録)
-- `/subscribe/update-card` — カード更新
+- `/` → `/admin` (未認証は `/admin/login`)
+- `/admin` — **登録者管理ボード**: 申込日/会員ID/プラン/利用開始日/課金開始日/解約日/
+  支払方法/状況(利用前・利用中・解約)/氏名・電話・メール/規約同意/当月課金状況
+  (正常・決済不備・確認中・未課金・対象外)。月フィルタ・要注意ハイライト・解約操作
+- `/subscribe` `/subscribe/update-card` — 申込・カード更新 (LPからの着地先)
 - `/legal/terms` `/legal/tokusho` — 利用規約 / 特定商取引法に基づく表記
-- `/api/payments/veritrans/subscribe` `/update-card` `/mpi-result` — 決済API
-- `/api/payments/cron/charge` — 日次課金 (Vercel Cron / `vercel.json`、10:00 JST)
+- `/api/payments/veritrans/*` — 決済API / `/api/payments/cron/charge` — 日次課金 (10:00 JST)
+
+カード番号等の決済個人情報はブラウザ→VeriTrans直送で、本アプリのサーバー・DB・ログ・
+管理画面のいずれにも保持しない。
 
 ## 開発
 
 ```bash
 npm install
-cp .env.example .env.local   # 値を設定
-npm run dev                  # http://localhost:3000/lp
-npm test                     # vitest (モックVeriTransでの機械検証)
-npm run typecheck
-npm run build
+cp .env.example .env.local   # 値を設定 (ADMIN_PASSWORD 必須)
+npm run dev                  # http://localhost:3000 → /admin
+npm test / npm run typecheck / npm run build
 ```
 
 ## デプロイ (Vercel)
 
-1. この GitHub リポジトリを Vercel の新規プロジェクトとして Import
-2. Environment Variables に `.env.example` のキーを設定
-   (Supabase 3値は CRM と同じプロジェクトの値、VeriTrans 3値はテスト利用情報通知書)
-3. Cron は `vercel.json` の定義で自動登録される (`CRON_SECRET` を設定)
+1. GitHub リポジトリを Vercel に Import (push で自動デプロイ)
+2. Environment Variables を設定 — `.env.example` 参照。特に:
+   - Supabase 3値 (CRMと同じプロジェクトの値)
+   - VeriTrans 3値 (テスト利用情報通知書)
+   - `ADMIN_PASSWORD` (管理ボード) / `CRON_SECRET`
+   - `PAYMENTS_NOTIFY_EMAIL=alliance@lifeap.co` + `SMTP_*` (申込通知)
+3. Cron は `vercel.json` で自動登録
+
+## LP との連携 (LP側の実装メモ)
+
+LP の「このプランで申し込む」ボタンを本アプリの本番URLへ:
+
+```html
+<a href="https://<payment-system のドメイン>/subscribe?plan=plus">このプランで申し込む</a>
+<a href="https://<payment-system のドメイン>/subscribe?plan=premium">このプランで申し込む</a>
+```
+
+プランIDは `features/payments/plans.ts` (`VT_PLANS_JSON` で上書き可) と一致させること。
 
 ## 決済の実機検証
 
-VeriTrans 検証環境(`api3.veritrans.co.jp`)へ到達できる環境で、
-テスト利用情報通知書の3値を設定して `/subscribe` を実行する。詳細な手順・
-テストカード・SPEC_CHECK は CRM 側 `docs/` の決済ドキュメントを参照。
+VeriTrans 検証環境(`api3.veritrans.co.jp`)へ到達できる環境で、テスト利用情報通知書の
+3値を設定して `/subscribe` を実行する。検証環境のテストカード例: `4111 1111 1111 1111`。

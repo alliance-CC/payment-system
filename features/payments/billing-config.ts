@@ -21,6 +21,8 @@ export type BillingPolicy = {
   /** 無料期間 (申込月を含むヶ月数)。0 で無料期間なし=申込時に初回課金。
    *  例: 2 → 申込月+翌月は無料、翌々月の1日から課金開始 (§規約 会費 L67「無料期間終了後の翌月から課金」)。 */
   freeMonths: number;
+  /** 解約時の停止タイミング。end_of_month=当月末まで利用可(翌月から停止・§規約) / immediate=即時停止。 */
+  cancelPolicy: "end_of_month" | "immediate";
 };
 
 export function getBillingPolicy(): BillingPolicy {
@@ -37,6 +39,25 @@ export function getBillingPolicy(): BillingPolicy {
     use3ds: String(process.env.VT_USE_3DS ?? "false").toLowerCase() === "true",
     // 既定 2 ヶ月無料 (申込月含む)。OEM/確定変更は PAYMENTS_FREE_MONTHS で上書き (§1.2/§10)。
     freeMonths: Math.max(0, parseInt(process.env.PAYMENTS_FREE_MONTHS ?? "2", 10) || 0),
+    cancelPolicy: process.env.PAYMENTS_CANCEL_POLICY === "immediate" ? "immediate" : "end_of_month",
+  };
+}
+
+// DB優先版 (管理画面 /admin/settings の保存値 → env → 既定)。実行時はこちらを使う。
+export async function loadBillingPolicy(): Promise<BillingPolicy> {
+  const base = getBillingPolicy();
+  const { loadPaymentSettings } = await import("./payment-settings");
+  const s = await loadPaymentSettings();
+  return {
+    ...base,
+    ...(Array.isArray(s.retryIntervalsDays) && s.retryIntervalsDays.length ? { retryIntervalsDays: s.retryIntervalsDays } : {}),
+    ...(typeof s.retryMax === "number" ? { retryMax: s.retryMax } : {}),
+    ...(Array.isArray(s.cardExpiredCodes) ? { cardExpiredCodePrefixes: s.cardExpiredCodes } : {}),
+    ...(s.notifyEmail !== undefined ? { notifyEmail: s.notifyEmail || null } : {}),
+    ...(s.termsVersion ? { termsVersion: s.termsVersion } : {}),
+    ...(typeof s.cronBatchLimit === "number" ? { cronBatchLimit: s.cronBatchLimit } : {}),
+    ...(typeof s.freeMonths === "number" ? { freeMonths: Math.max(0, s.freeMonths) } : {}),
+    ...(s.cancelPolicy === "immediate" || s.cancelPolicy === "end_of_month" ? { cancelPolicy: s.cancelPolicy } : {}),
   };
 }
 

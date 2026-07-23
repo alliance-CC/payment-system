@@ -226,7 +226,7 @@ describe("③ 継続課金 — 初回課金日に会員ID都度決済 → 以降
     expect(card.params.withCapture).toBe("true");           // 実課金 (売上確定)
     expect(card.params.payNowIdParam.token).toBeUndefined();
     expect(card.params.payNowIdParam.accountParam.accountId).toBe(res.ok ? res.accountId : "");
-    expect(card.params.amount).toBe("1200");
+    expect(card.params.amount).toBe("1320");   // plus の既定金額 (規約 会費表②)
 
     // 課金成功が記録され、次回課金日は翌月1日 (毎月1日課金)
     expect(mem.charges.some((x) => x.ok === true)).toBe(true);

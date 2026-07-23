@@ -1,6 +1,6 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
+import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
 export type RegistrantRow = {
@@ -35,7 +35,7 @@ function jstDate(iso: string | null): string {
 
 export async function loadBoard(opts: { month: string; status?: string }): Promise<Board> {
   const svc = createSupabaseService();
-  const policy = getBillingPolicy();
+  const policy = await loadBillingPolicy();
   const today = todayJst();
   const month = opts.month;
 

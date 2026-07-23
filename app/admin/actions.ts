@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
 import { cancelSubscription } from "@/features/payments/billing";
+import { savePaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const pw = String(formData.get("password") ?? "");
@@ -30,4 +31,41 @@ export async function cancelAction(formData: FormData): Promise<void> {
   if (accountId) await cancelSubscription(accountId);
   const month = String(formData.get("month") ?? "");
   redirect(`/admin${month ? `?month=${encodeURIComponent(month)}` : ""}`);
+}
+
+// 課金設定の保存 (金額/プラン・無料期間・継続課金・解約ポリシー)。DB(integrations)へ。
+export async function saveSettingsAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const ids = formData.getAll("plan_id").map(String);
+  const names = formData.getAll("plan_name").map(String);
+  const amounts = formData.getAll("plan_amount").map(String);
+  const plans = ids
+    .map((id, i) => ({
+      id: id.trim(),
+      name: (names[i] ?? "").trim(),
+      amount: Math.max(0, parseInt(amounts[i] ?? "0", 10) || 0),
+      cycle: "monthly" as const,
+    }))
+    .filter((p) => p.id && p.name);
+
+  const num = (k: string, d: number) => {
+    const v = parseInt(String(formData.get(k) ?? ""), 10);
+    return Number.isFinite(v) ? v : d;
+  };
+  const list = (k: string) =>
+    String(formData.get(k) ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+
+  const settings: PaymentSettings = {
+    plans,
+    freeMonths: Math.max(0, num("freeMonths", 2)),
+    retryIntervalsDays: list("retryIntervalsDays").map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n) && n > 0),
+    retryMax: Math.max(0, num("retryMax", 3)),
+    cardExpiredCodes: list("cardExpiredCodes"),
+    cronBatchLimit: Math.max(1, num("cronBatchLimit", 200)),
+    notifyEmail: String(formData.get("notifyEmail") ?? "").trim() || null,
+    termsVersion: String(formData.get("termsVersion") ?? "").trim() || "draft-2026-07",
+    cancelPolicy: String(formData.get("cancelPolicy")) === "immediate" ? "immediate" : "end_of_month",
+  };
+  const res = await savePaymentSettings(settings);
+  redirect(`/admin/settings?saved=${res.ok ? "1" : "0"}`);
 }
