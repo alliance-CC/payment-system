@@ -50,7 +50,9 @@ export default function SignupFlow({
     planLocked ? initialPlanId! : (plans[0]?.id ?? ""),
   );
   const [agreed, setAgreed] = useState(false);
-  const [name, setName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const fullName = `${lastName.trim()} ${firstName.trim()}`.trim();
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [serviceStart, setServiceStart] = useState(defaultServiceStart());
@@ -79,7 +81,7 @@ export default function SignupFlow({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planId, name, phone, email,
+          planId, name: fullName, phone, email,
           serviceStartDate: serviceStart,
           token: tok.token, tokenKey: tok.tokenKey,
           consentAccepted: agreed,
@@ -140,7 +142,7 @@ export default function SignupFlow({
   const canNext =
     step === 0 ? !!plan :
     step === 1 ? agreed :
-    step === 2 ? name.trim() !== "" && phone.trim() !== "" && isEmail(email) && !!serviceStart :
+    step === 2 ? lastName.trim() !== "" && firstName.trim() !== "" && phone.trim() !== "" && isEmail(email) && !!serviceStart :
     true;
 
   // プラン確定 (LP 由来) 時は プラン選択ステップ(0) を隠す。最小ステップは 1
@@ -225,9 +227,13 @@ export default function SignupFlow({
       {step === 2 && (
         <div className="space-y-3">
           <div>
-            <div className="label">氏名 *</div>
-            <input className="input w-full" value={name} onChange={(e) => setName(e.target.value)}
-              autoComplete="name" placeholder="山田 太郎" required />
+            <div className="label">お名前 *</div>
+            <div className="grid grid-cols-2 gap-2">
+              <input className="input w-full" value={lastName} onChange={(e) => setLastName(e.target.value)}
+                autoComplete="family-name" placeholder="姓（山田）" required />
+              <input className="input w-full" value={firstName} onChange={(e) => setFirstName(e.target.value)}
+                autoComplete="given-name" placeholder="名（太郎）" required />
+            </div>
           </div>
           <div>
             <div className="label">電話番号 *</div>

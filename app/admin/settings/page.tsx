@@ -9,7 +9,7 @@ import { saveSettingsAction } from "../actions";
 export const dynamic = "force-dynamic";
 export const metadata = { title: "課金設定 | Memoreal Payments" };
 
-export default async function SettingsPage({ searchParams }: { searchParams: { saved?: string } }) {
+export default async function SettingsPage({ searchParams }: { searchParams: { saved?: string; err?: string } }) {
   requireAdmin();
   const plans = await loadPlans();
   const policy = await loadBillingPolicy();
@@ -31,7 +31,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
         </header>
 
         {searchParams.saved === "1" && <div className="card p-3 text-sm text-good">保存しました。以降の申込・課金に反映されます。</div>}
-        {searchParams.saved === "0" && <div className="card p-3 text-sm text-bad">保存に失敗しました(Supabase設定・権限をご確認ください)。</div>}
+        {searchParams.saved === "0" && (
+          <div className="card p-3 text-sm text-bad">
+            保存に失敗しました。
+            {searchParams.err ? <span className="block mt-1 font-mono text-xs break-all">理由: {searchParams.err}</span> : null}
+          </div>
+        )}
 
         <form action={saveSettingsAction} className="space-y-4">
           {/* プラン・金額 */}

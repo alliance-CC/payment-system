@@ -21,7 +21,7 @@ import {
   todayJst, monthOf, yyyymmOf, addDays, nextChargeDateAfter, recurringOrderId,
   firstChargeDate, endOfMonth,
 } from "./billing-config";
-import { sendEmailViaSmtp } from "@/features/messages/send";
+import { sendMail } from "@/features/messages/mail";
 
 // ---- 申込 (§1.1 手順2〜6) ------------------------------------------------
 
@@ -307,7 +307,7 @@ async function sendWelcomeEmail(
     chargeStartDate: v.chargeStartDate,
   };
   const fill = (t: string) => t.replace(/\{(\w+)\}/g, (_, k) => map[k] ?? `{${k}}`);
-  const res = await sendEmailViaSmtp({ to: v.to, subject: fill(subjTpl), body: fill(bodyTpl) }, tenantId);
+  const res = await sendMail({ to: v.to, subject: fill(subjTpl), body: fill(bodyTpl) }, tenantId);
   if (!res.ok) console.error("[payments] welcome mail send failed:", (res as any).error);
 }
 
@@ -329,7 +329,7 @@ async function notifyRegistration(
     `電話番号: ${info.phone}`,
     `メール: ${info.email ?? "(未取得)"}`,
   ].join("\n");
-  const res = await sendEmailViaSmtp(
+  const res = await sendMail(
     { to: policy.notifyEmail, subject: "【継続課金】新規申込通知", body },
     tenantId,
   );
@@ -575,7 +575,7 @@ async function notifyCardExpired(contract: ContractRow): Promise<void> {
     `氏名: ${contract.contact_name ?? "-"} / 電話: ${contract.contact_phone ?? "-"}`,
     `カード更新URL: /subscribe/update-card?account=${contract.account_id}`,
   ].join("\n");
-  await sendEmailViaSmtp(
+  await sendMail(
     { to: policy.notifyEmail, subject: "【継続課金】カード期限切れ検知", body },
     contract.tenant_id,
   ).catch(() => {});

@@ -71,5 +71,6 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     },
   };
   const res = await savePaymentSettings(settings);
-  redirect(`/admin/settings?saved=${res.ok ? "1" : "0"}`);
+  if (res.ok) redirect("/admin/settings?saved=1");
+  redirect(`/admin/settings?saved=0&err=${encodeURIComponent(res.error ?? "unknown")}`);
 }

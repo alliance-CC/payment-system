@@ -42,6 +42,9 @@ export const DEFAULT_WELCOME_BODY = [
   "本メールにお心当たりのない場合は破棄してください。",
 ].join("\n");
 
+// integrations.tenant_id は NOT NULL (0036)。既定テナントに固定して読み書きする。
+const DEFAULT_TENANT_ID = process.env.PAYMENTS_DEFAULT_TENANT_ID || "00000000-0000-0000-0000-000000000001";
+
 function dbReady(): boolean {
   return !!(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
@@ -55,6 +58,7 @@ export async function loadPaymentSettings(): Promise<Partial<PaymentSettings>> {
       .from("integrations")
       .select("config")
       .eq("provider", PROVIDER)
+      .eq("tenant_id", DEFAULT_TENANT_ID)
       .eq("is_active", true)
       .limit(1)
       .maybeSingle();
@@ -66,11 +70,15 @@ export async function loadPaymentSettings(): Promise<Partial<PaymentSettings>> {
 
 /** 設定を保存(単一行 upsert)。管理画面の保存アクションから呼ぶ。 */
 export async function savePaymentSettings(cfg: PaymentSettings): Promise<{ ok: boolean; error?: string }> {
-  if (!dbReady()) return { ok: false, error: "supabase-not-configured" };
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) return { ok: false, error: "NEXT_PUBLIC_SUPABASE_URL が未設定です" };
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return { ok: false, error: "SUPABASE_SERVICE_ROLE_KEY が未設定です (Vercel の環境変数に追加してください)" };
   try {
     const svc = createSupabaseService();
-    const { data: existing } = await svc
-      .from("integrations").select("id").eq("provider", PROVIDER).limit(1).maybeSingle();
+    const { data: existing, error: selErr } = await svc
+      .from("integrations").select("id")
+      .eq("provider", PROVIDER).eq("tenant_id", DEFAULT_TENANT_ID)
+      .limit(1).maybeSingle();
+    if (selErr) return { ok: false, error: `read: ${selErr.message}` };
     if (existing?.id) {
       const { error } = await svc.from("integrations")
         .update({ config: cfg, is_active: true, updated_at: new Date().toISOString() })
@@ -78,7 +86,7 @@ export async function savePaymentSettings(cfg: PaymentSettings): Promise<{ ok: b
       if (error) return { ok: false, error: error.message };
     } else {
       const { error } = await svc.from("integrations")
-        .insert({ provider: PROVIDER, label: "default", config: cfg });
+        .insert({ provider: PROVIDER, label: "default", tenant_id: DEFAULT_TENANT_ID, config: cfg });
       if (error) return { ok: false, error: error.message };
     }
     return { ok: true };
