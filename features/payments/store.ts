@@ -27,6 +27,8 @@ export type ContractRow = {
   free_key: string | null;
   /** 利用開始日 (2ヶ月無料の起点)。列 p001 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
   service_start_date?: string | null;
+  /** フリガナ (カタカナ)。列 p002 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
+  contact_name_kana?: string | null;
 };
 
 const CONTRACT_COLS =
@@ -52,6 +54,29 @@ export async function getServiceStartMap(ids: string[]): Promise<Map<string, str
       .from("payment_contracts").select("id, service_start_date").in("id", ids);
     if (error) return map;
     for (const r of data ?? []) map.set((r as any).id, (r as any).service_start_date ?? null);
+  } catch { /* 列が無ければ空マップ */ }
+  return map;
+}
+
+/** フリガナ(カタカナ)をベストエフォートで保存 (列 p002 未適用でも申込を失敗させない)。 */
+export async function updateContractNameKana(id: string, kana: string | null): Promise<void> {
+  if (!kana) return;
+  try {
+    const service = createSupabaseService();
+    await service.from("payment_contracts").update({ contact_name_kana: kana }).eq("id", id);
+  } catch { /* 列が無ければ黙って無視 */ }
+}
+
+/** contract_id → フリガナ のマップをベストエフォートで取得 (列 p002 未適用なら空)。 */
+export async function getContractNameKanaMap(ids: string[]): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (!ids.length) return map;
+  try {
+    const service = createSupabaseService();
+    const { data, error } = await service
+      .from("payment_contracts").select("id, contact_name_kana").in("id", ids);
+    if (error) return map;
+    for (const r of data ?? []) map.set((r as any).id, (r as any).contact_name_kana ?? null);
   } catch { /* 列が無ければ空マップ */ }
   return map;
 }

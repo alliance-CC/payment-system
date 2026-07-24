@@ -106,6 +106,9 @@ vi.mock("./store", () => ({
   },
   insertConsent: async (row: any) => { mem.consents.push(row); },
   updateServiceStartDate: async (_id: string, _date: string | null) => { /* 列 p001 のベストエフォート保存 (テストでは no-op) */ },
+  updateContractNameKana: async (id: string, kana: string | null) => {
+    const c = mem.contracts.find((x) => x.id === id); if (c) c.contact_name_kana = kana;
+  },
 }));
 
 vi.mock("./crm-adapter", () => ({

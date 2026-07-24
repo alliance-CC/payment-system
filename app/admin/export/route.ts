@@ -24,13 +24,13 @@ export async function GET(req: Request) {
 
   const header = [
     "申込日", "会員ID", "プラン", "利用開始日", "課金開始日", "状況",
-    `当月課金(${month})`, "氏名", "電話番号", "メール", "支払方法", "利用規約", "解約日",
+    `当月課金(${month})`, "氏名", "フリガナ", "電話番号", "メール", "支払方法", "利用規約", "解約日",
   ];
   const lines = [header.map(cell).join(",")];
   for (const r of rows) {
     lines.push([
       r.appliedAt, r.accountId, r.planName, r.serviceStart, r.chargeStart, r.statusLabel,
-      r.monthBilling, r.name ?? "", r.phone ?? "", r.email ?? "", r.paymentMethod,
+      r.monthBilling, r.name ?? "", r.nameKana ?? "", r.phone ?? "", r.email ?? "", r.paymentMethod,
       r.consented ? "同意済" : "未同意", r.canceledAt ?? "",
     ].map(cell).join(","));
   }

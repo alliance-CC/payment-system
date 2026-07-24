@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   }
   const body = await req.json().catch(() => ({}));
-  const { planId, name, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate } = body ?? {};
+  const { planId, name, nameKana, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate } = body ?? {};
 
   if (!consentAccepted) {
     return NextResponse.json({ error: "consent-required" }, { status: 400 });
@@ -52,6 +52,7 @@ export async function POST(req: Request) {
     tenantId,
     planId: String(planId ?? ""),
     name: nameStr.slice(0, 100),
+    nameKana: nameKana ? String(nameKana).slice(0, 100) : null,
     phone: phoneStr.slice(0, 30),
     email: emailStr.slice(0, 200),
     paymentMethod: "card",

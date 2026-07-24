@@ -1,73 +1,49 @@
-// 利用規約ページ。支給された規約本文 (terms-content.ts) をそのまま表示する。
-//   ・「（見出し）」だけの行 → 見出し
-//   ・「A | B | C」の連続行 → 表
-//   ・「第◯章」等の章題 → 大見出し
-//   ※ 申込画面 (/subscribe) から別タブで開き、確認後に同意チェックする導線。
-import { TERMS_TEXT } from "./terms-content";
+// 利用規約トップ。ご契約プランごとに規約を分けて掲載。
+//   申込フロー(/subscribe)・LP からプラン別ページ(/legal/terms/plus|premium)へ導線。
+import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 
-export const metadata = { title: "利用規約 — ネットライフサポート" };
+export const metadata = { title: "利用規約 — 株式会社ライフアップ" };
 
-type Block =
-  | { t: "chapter"; text: string }
-  | { t: "heading"; text: string }
-  | { t: "para"; text: string }
-  | { t: "table"; rows: string[][] };
+const PLANS = [
+  { id: "plus", name: "暮らし安心プラス", desc: "近隣トラブル解決支援まもるん ／ ネットライフサポート", price: "月額 ¥1,320（税込・税抜¥1,200）" },
+  { id: "premium", name: "暮らし安心プレミアム", desc: "プラスの内容 ＋ データ復旧 ／ セキュリティ", price: "月額 ¥1,870（税込・税抜¥1,700）" },
+];
 
-function parse(text: string): Block[] {
-  const lines = text.split("\n").map((l) => l.replace(/\s+$/, ""));
-  const blocks: Block[] = [];
-  let tableRows: string[][] | null = null;
-  const flush = () => { if (tableRows && tableRows.length) blocks.push({ t: "table", rows: tableRows }); tableRows = null; };
-
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line) { flush(); continue; }
-    if (line.includes(" | ")) {
-      const cells = line.split("|").map((c) => c.trim()).filter((_, i, a) => !(i === a.length - 1 && a[i] === ""));
-      (tableRows ??= []).push(cells);
-      continue;
-    }
-    flush();
-    if (/^(第[０-９0-9一二三四五六七八九十]+章|総則|サービス利用規約)/.test(line) && line.length < 30) {
-      blocks.push({ t: "chapter", text: line });
-    } else if (/^（.+）$/.test(line)) {
-      blocks.push({ t: "heading", text: line });
-    } else {
-      blocks.push({ t: "para", text: line });
-    }
-  }
-  flush();
-  return blocks;
-}
-
-export default function TermsPage() {
-  const blocks = parse(TERMS_TEXT);
+export default function TermsIndexPage() {
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-3">
-      <h1 className="text-2xl font-bold text-navy mb-2">利用規約</h1>
-      {blocks.map((b, i) => {
-        if (b.t === "chapter")
-          return <h2 key={i} className="text-lg font-bold text-navy mt-6 pt-2 border-t border-border">{b.text}</h2>;
-        if (b.t === "heading")
-          return <h3 key={i} className="text-sm font-semibold text-navy mt-4">{b.text}</h3>;
-        if (b.t === "table")
-          return (
-            <div key={i} className="overflow-x-auto my-2">
-              <table className="w-full text-xs border border-border">
-                <tbody>
-                  {b.rows.map((r, ri) => (
-                    <tr key={ri} className={ri === 0 ? "bg-bg/60 font-medium" : ""}>
-                      {r.map((c, ci) => (
-                        <td key={ci} className="border border-border p-2 whitespace-pre-line align-top">{c}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+    <main className="max-w-2xl mx-auto px-4 py-10 md:py-14">
+      <h1 className="text-2xl md:text-3xl font-bold text-navy">利用規約</h1>
+      <p className="text-sm text-muted mt-2">
+        ご契約（またはお申し込み予定）のプランに応じた利用規約をご確認ください。
+      </p>
+
+      <div className="grid gap-3 mt-6">
+        {PLANS.map((p) => (
+          <Link
+            key={p.id}
+            href={`/legal/terms/${p.id}`}
+            className="card p-4 flex items-center justify-between gap-3 hover:border-navy/40 transition-colors"
+          >
+            <div>
+              <div className="font-semibold text-navy">{p.name}の方はこちら</div>
+              <div className="text-[12px] text-muted mt-0.5">{p.desc}</div>
+              <div className="text-[12px] text-ink mt-1">{p.price}</div>
             </div>
-          );
-        return <p key={i} className="text-[13px] leading-relaxed text-ink">{b.text}</p>;
-      })}
+            <ArrowRight size={18} className="text-accent shrink-0" />
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-8 text-sm">
+        <Link href="/legal/tokusho" className="text-accent hover:underline">特定商取引法に基づく表記</Link>
+      </div>
+
+      <div className="card p-4 mt-6 text-[13px] text-ink">
+        <div className="font-semibold text-navy mb-1.5">事業者情報</div>
+        <p>株式会社ライフアップ</p>
+        <p className="text-muted">電話 <a href="tel:0367099237" className="text-accent hover:underline">03-6709-9237</a>（受付 11:00〜20:00／年末年始除く）</p>
+      </div>
     </main>
   );
 }
