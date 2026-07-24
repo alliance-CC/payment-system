@@ -85,7 +85,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     cardExpiredCodes: list("cardExpiredCodes"),
     cronBatchLimit: Math.max(1, num("cronBatchLimit", 200)),
     notifyEmail: String(formData.get("notifyEmail") ?? "").trim() || null,
-    termsVersion: String(formData.get("termsVersion") ?? "").trim() || "draft-2026-07",
+    termsVersion: String(formData.get("termsVersion") ?? "").trim() || "2026-07-01",
     cancelPolicy: String(formData.get("cancelPolicy")) === "immediate" ? "immediate" : "end_of_month",
     welcomeEmail: {
       subject: String(formData.get("welcome_subject") ?? "").trim(),
