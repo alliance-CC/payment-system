@@ -3,7 +3,7 @@
 //   (プラン=LPから確定) → 1. お客様情報(氏名・フリガナ・電話・メール・利用開始日・規約同意)
 //                        → 2. カード入力 → 完了
 //   カード番号は tokenize.ts でブラウザ→VeriTrans 直送 (サーバー非通過 §2/§7)。
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   CreditCard, Loader2, CheckCircle2, AlertCircle, Lock,
   ChevronRight, ChevronLeft, ExternalLink,
@@ -72,34 +72,6 @@ export default function SignupFlow({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ accountId: string; nextChargeDate: string } | null>(null);
 
-  // 利用規約を見て戻ってきたときにフォーム内容を復元する (カード情報は保存しない §7)。
-  const SS_KEY = "kurashi-signup";
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(SS_KEY);
-      if (!raw) return;
-      const s = JSON.parse(raw);
-      if (!planLocked && typeof s.planId === "string") setPlanId(s.planId);
-      if (typeof s.lastName === "string") setLastName(s.lastName);
-      if (typeof s.firstName === "string") setFirstName(s.firstName);
-      if (typeof s.lastNameKana === "string") setLastNameKana(s.lastNameKana);
-      if (typeof s.firstNameKana === "string") setFirstNameKana(s.firstNameKana);
-      if (typeof s.phone === "string") setPhone(s.phone);
-      if (typeof s.email === "string") setEmail(s.email);
-      if (typeof s.serviceStart === "string") setServiceStart(s.serviceStart);
-      if (typeof s.agreed === "boolean") setAgreed(s.agreed);
-    } catch { /* 破損時は無視 */ }
-    // 初回マウント時のみ
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  useEffect(() => {
-    try {
-      sessionStorage.setItem(SS_KEY, JSON.stringify({
-        planId, lastName, firstName, lastNameKana, firstNameKana, phone, email, serviceStart, agreed,
-      }));
-    } catch { /* 容量超過等は無視 */ }
-  }, [planId, lastName, firstName, lastNameKana, firstNameKana, phone, email, serviceStart, agreed]);
-
   const plan = plans.find((p) => p.id === planId);
 
   async function submit(e: React.FormEvent) {
@@ -139,7 +111,6 @@ export default function SignupFlow({
         setError(json?.vtDetail ? `${msg}\n詳細: ${json.vtDetail}` : msg);
         return;
       }
-      try { sessionStorage.removeItem(SS_KEY); } catch { /* noop */ }
       setDone({ accountId: json.accountId, nextChargeDate: json.nextChargeDate });
     } catch (err: any) {
       setError(String(err?.message ?? err));
@@ -180,8 +151,10 @@ export default function SignupFlow({
     phone.trim() !== "" && isEmail(email) && !!serviceStart && agreed;
   const canNext = cur === "plan" ? !!plan : cur === "info" ? infoValid : true;
   const isLast = idx === steps.length - 1;
-  // 規約は同じタブで開き、規約ページから「お申し込みに戻る」で復帰できるようにする (入力はsessionStorageで保持)
+  // 規約は「新しいタブ」で開く。申込フォームは元のタブにそのまま残り、
+  // 規約タブを閉じれば入力内容を保ったまま戻れる (window.openで開くとタブ側で閉じられる)。
   const termsHref = `/legal/terms/${planId}?from=subscribe`;
+  const openTerms = (e: React.MouseEvent) => { e.preventDefault(); window.open(termsHref, "_blank"); };
 
   return (
     <>
@@ -274,9 +247,9 @@ export default function SignupFlow({
 
             {/* 規約リンク（申込プランの利用規約）＋同意チェック */}
             <div className="pt-1">
-              <a href={termsHref} target="_blank" rel="noreferrer"
+              <a href={termsHref} target="_blank" rel="noopener" onClick={openTerms}
                  className="inline-flex items-center gap-1 text-[13px] text-accent underline font-medium">
-                「{plan?.name ?? "本プラン"}」の利用規約を確認する<ExternalLink size={12} />
+                「{plan?.name ?? "本プラン"}」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
               </a>
               <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
                 <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
