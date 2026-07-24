@@ -1,25 +1,24 @@
 "use client";
-// 継続課金の申込フロー (§1.1 確定):
-//   1. プラン選択 → 2. 同意 → 3. 氏名・電話(+メール任意) → 4. 支払方法 → 5. カード入力 → 完了
-// カード番号は tokenize.ts でブラウザ→VeriTrans 直送 (サーバー非通過 §2/§7)。
+// 継続課金の申込フロー (§1.1 確定・短縮版):
+//   (プラン=LPから確定) → 1. お客様情報(氏名・フリガナ・電話・メール・利用開始日・規約同意)
+//                        → 2. カード入力 → 完了
+//   カード番号は tokenize.ts でブラウザ→VeriTrans 直送 (サーバー非通過 §2/§7)。
 import { useState } from "react";
 import {
   CreditCard, Loader2, CheckCircle2, AlertCircle, Lock,
-  Landmark, ChevronRight, ChevronLeft,
+  ChevronRight, ChevronLeft, ExternalLink,
 } from "lucide-react";
 import { tokenizeCard } from "./tokenize";
 
 type Plan = { id: string; name: string; amount: number };
+type StepKey = "plan" | "info" | "pay";
+const STEP_LABEL: Record<StepKey, string> = { plan: "プラン", info: "お客様情報", pay: "お支払い" };
 
-const STEPS = ["プラン", "同意", "お客様情報", "お支払い"] as const;
-
-// カード番号を数字のみ・4桁ごとにスペース区切りへ整形 (最大19桁)。
-// 送信時は tokenize.ts 側でスペースを除去する
+// カード番号を数字のみ・4桁ごとにスペース区切りへ整形 (最大19桁)。送信時に tokenize 側で除去。
 function formatCardNumber(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 19);
   return digits.replace(/(.{4})/g, "$1 ").trim();
 }
-
 // 既定のご利用開始日 = 申込月の翌月1日 (JST)。
 function defaultServiceStart(): string {
   const now = new Date(Date.now() + 9 * 3600_000);
@@ -28,6 +27,11 @@ function defaultServiceStart(): string {
 }
 function isEmail(s: string): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.trim());
+}
+// 全角カタカナ(＋長音符・中黒・空白)のみ許可。
+const KATAKANA = /^[ァ-ヶー・\s]+$/;
+function isKatakana(s: string): boolean {
+  return s.trim() !== "" && KATAKANA.test(s.trim());
 }
 
 export default function SignupFlow({
@@ -40,23 +44,26 @@ export default function SignupFlow({
   termsVersion: string;
   caseId?: string;
   tenantSlug?: string;
-  /** LP の申込ボタンから ?plan= で渡されたプラン。有効ならプラン選択を省略して同意から開始 */
+  /** LP の申込ボタンから ?plan= で渡されたプラン。有効ならプラン選択を省略。 */
   initialPlanId?: string;
 }) {
-  // LP でプランを選んで来た場合 (?plan=plus 等) はプラン選択ステップを飛ばす
   const planLocked = !!(initialPlanId && plans.some((p) => p.id === initialPlanId));
-  const [step, setStep] = useState(planLocked ? 1 : 0);
-  const [planId, setPlanId] = useState(
-    planLocked ? initialPlanId! : (plans[0]?.id ?? ""),
-  );
+  // プラン確定時は「お客様情報 → お支払い」の2ステップ、未確定時は先頭に「プラン」。
+  const steps: StepKey[] = planLocked ? ["info", "pay"] : ["plan", "info", "pay"];
+  const [idx, setIdx] = useState(0);
+  const cur = steps[idx];
+
+  const [planId, setPlanId] = useState(planLocked ? initialPlanId! : (plans[0]?.id ?? ""));
   const [agreed, setAgreed] = useState(false);
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
+  const [lastNameKana, setLastNameKana] = useState("");
+  const [firstNameKana, setFirstNameKana] = useState("");
   const fullName = `${lastName.trim()} ${firstName.trim()}`.trim();
+  const fullNameKana = `${lastNameKana.trim()} ${firstNameKana.trim()}`.trim();
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [serviceStart, setServiceStart] = useState(defaultServiceStart());
-  const [method, setMethod] = useState<"card" | "bank">("card");
   const [number, setNumber] = useState("");
   const [expMonth, setExpMonth] = useState("");
   const [expYear, setExpYear] = useState("");
@@ -76,12 +83,12 @@ export default function SignupFlow({
       const tok = await tokenizeCard(tokenUrl, tokenApiKey, { number, expMonth, expYear, cvc });
       if (!tok.ok) { setError(tok.error); return; }
 
-      // 2. 申込 (サーバーが 会員登録+初回課金+CRM反映+通知 を実行 §1.1-5,6)
+      // 2. 申込 (サーバーが 会員登録+カード登録+CRM反映+通知 を実行 §1.1-5,6)
       const res = await fetch("/api/payments/veritrans/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planId, name: fullName, phone, email,
+          planId, name: fullName, nameKana: fullNameKana, phone, email,
           serviceStartDate: serviceStart,
           token: tok.token, tokenKey: tok.tokenKey,
           consentAccepted: agreed,
@@ -101,7 +108,6 @@ export default function SignupFlow({
           : json?.error === "email-required"
           ? "メールアドレスをご入力ください"
           : `お申し込みに失敗しました${code}`;
-        // 検証時の原因特定用: VeriTrans の詳細メッセージがあれば併記
         setError(json?.vtDetail ? `${msg}\n詳細: ${json.vtDetail}` : msg);
         return;
       }
@@ -139,212 +145,198 @@ export default function SignupFlow({
     );
   }
 
-  const canNext =
-    step === 0 ? !!plan :
-    step === 1 ? agreed :
-    step === 2 ? lastName.trim() !== "" && firstName.trim() !== "" && phone.trim() !== "" && isEmail(email) && !!serviceStart :
-    true;
-
-  // プラン確定 (LP 由来) 時は プラン選択ステップ(0) を隠す。最小ステップは 1
-  const minStep = planLocked ? 1 : 0;
-  const visibleSteps = planLocked ? STEPS.slice(1) : STEPS;
+  const infoValid =
+    lastName.trim() !== "" && firstName.trim() !== "" &&
+    isKatakana(lastNameKana) && isKatakana(firstNameKana) &&
+    phone.trim() !== "" && isEmail(email) && !!serviceStart && agreed;
+  const canNext = cur === "plan" ? !!plan : cur === "info" ? infoValid : true;
+  const isLast = idx === steps.length - 1;
+  const termsHref = `/legal/terms/${planId}`;
 
   return (
-    <form onSubmit={submit} className="card p-6 space-y-5">
-      {/* プラン確定バナー (LP で選択済みのとき) */}
-      {planLocked && plan && (
-        <div className="flex items-center justify-between rounded-xl border border-navy/30 bg-navy/5 px-3 py-2.5">
-          <div className="flex items-center gap-2 text-sm">
-            <CheckCircle2 size={15} className="text-navy" />
-            <span className="font-medium">{plan.name}</span>
+    <>
+      <form onSubmit={submit} className="card p-6 space-y-5">
+        {/* プラン確定バナー (LP で選択済みのとき) */}
+        {planLocked && plan && (
+          <div className="flex items-center justify-between rounded-xl border border-navy/30 bg-navy/5 px-3 py-2.5">
+            <div className="flex items-center gap-2 text-sm">
+              <CheckCircle2 size={15} className="text-navy" />
+              <span className="font-medium">{plan.name}</span>
+            </div>
+            <span className="text-sm font-semibold">月額 ¥{plan.amount.toLocaleString()}</span>
           </div>
-          <span className="text-sm font-semibold">月額 ¥{plan.amount.toLocaleString()}</span>
-        </div>
-      )}
+        )}
 
-      {/* ステップインジケータ (プラン確定時は「同意」から表示) */}
-      <ol className="flex items-center gap-1 text-[11px] text-muted">
-        {visibleSteps.map((s, vi) => {
-          const i = vi + minStep;
-          return (
+        {/* ステップインジケータ */}
+        <ol className="flex items-center gap-1 text-[11px] text-muted">
+          {steps.map((s, i) => (
             <li key={s} className="flex items-center gap-1">
               <span className={
                 "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold " +
-                (i === step ? "bg-navy text-white" : i < step ? "bg-good/15 text-good" : "bg-bg text-muted")
-              }>{vi + 1}</span>
-              <span className={i === step ? "text-ink font-medium" : ""}>{s}</span>
-              {vi < visibleSteps.length - 1 && <ChevronRight size={11} className="text-muted/50" />}
+                (i === idx ? "bg-navy text-white" : i < idx ? "bg-good/15 text-good" : "bg-bg text-muted")
+              }>{i + 1}</span>
+              <span className={i === idx ? "text-ink font-medium" : ""}>{STEP_LABEL[s]}</span>
+              {i < steps.length - 1 && <ChevronRight size={11} className="text-muted/50" />}
             </li>
-          );
-        })}
-      </ol>
-
-      {/* 1. プラン選択 (§1.1-1) */}
-      {step === 0 && (
-        <div className="space-y-2">
-          {plans.map((p) => (
-            <label key={p.id} className={
-              "flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors " +
-              (planId === p.id ? "border-navy bg-navy/5" : "border-border hover:border-navy/40")
-            }>
-              <input type="radio" name="plan" value={p.id} checked={planId === p.id}
-                onChange={() => setPlanId(p.id)} className="accent-current" />
-              <span className="flex-1 text-sm font-medium">{p.name}</span>
-              <span className="text-sm font-semibold">月額 ¥{p.amount.toLocaleString()}</span>
-            </label>
           ))}
-        </div>
-      )}
+        </ol>
 
-      {/* 2. 同意 (§1.1-2)。規約は別ページ (LP内) で確認してもらい、戻ってチェックする導線 */}
-      {step === 1 && (
-        <div className="space-y-4">
-          <div className="card bg-bg/50 p-4 space-y-3 text-sm">
-            <p>お申し込みの前に、下記の内容を必ずご確認ください。</p>
-            <div className="flex flex-col gap-2">
-              <a href="/legal/terms" target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1.5 text-accent underline font-medium">
-                利用規約を確認する（別ウィンドウで開きます）
-              </a>
-              <a href="/legal/tokusho" target="_blank" rel="noreferrer"
-                 className="inline-flex items-center gap-1.5 text-accent underline font-medium">
-                特定商取引法に基づく表記を確認する
-              </a>
+        {/* プラン選択 (LP 未経由の直アクセス時のみ) */}
+        {cur === "plan" && (
+          <div className="space-y-2">
+            {plans.map((p) => (
+              <label key={p.id} className={
+                "flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-colors " +
+                (planId === p.id ? "border-navy bg-navy/5" : "border-border hover:border-navy/40")
+              }>
+                <input type="radio" name="plan" value={p.id} checked={planId === p.id}
+                  onChange={() => setPlanId(p.id)} className="accent-current" />
+                <span className="flex-1 text-sm font-medium">{p.name}</span>
+                <span className="text-sm font-semibold">月額 ¥{p.amount.toLocaleString()}</span>
+              </label>
+            ))}
+          </div>
+        )}
+
+        {/* お客様情報: 氏名・フリガナ(カタカナ)・電話・メール・利用開始日・規約同意 */}
+        {cur === "info" && (
+          <div className="space-y-3">
+            <div>
+              <div className="label">お名前 *</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input w-full" value={lastName} onChange={(e) => setLastName(e.target.value)}
+                  autoComplete="family-name" placeholder="姓（山田）" required />
+                <input className="input w-full" value={firstName} onChange={(e) => setFirstName(e.target.value)}
+                  autoComplete="given-name" placeholder="名（太郎）" required />
+              </div>
             </div>
-            <p className="text-[11px] text-muted">
-              本サービスは毎月の継続課金（自動課金）です。解約のお申し出があるまで課金は継続され、
-              解約はいつでも可能です（規約バージョン: {termsVersion}）。
-            </p>
-          </div>
-          <label className="flex items-start gap-2 text-sm cursor-pointer">
-            <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
-            <span>利用規約および特定商取引法に基づく表記の内容を確認し、同意します</span>
-          </label>
-        </div>
-      )}
+            <div>
+              <div className="label">フリガナ（カタカナ）*</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input w-full" value={lastNameKana} onChange={(e) => setLastNameKana(e.target.value)}
+                  placeholder="セイ（ヤマダ）" required />
+                <input className="input w-full" value={firstNameKana} onChange={(e) => setFirstNameKana(e.target.value)}
+                  placeholder="メイ（タロウ）" required />
+              </div>
+              {((lastNameKana && !isKatakana(lastNameKana)) || (firstNameKana && !isKatakana(firstNameKana))) && (
+                <p className="text-[11px] text-bad mt-1">カタカナでご入力ください</p>
+              )}
+            </div>
+            <div>
+              <div className="label">電話番号 *</div>
+              <input className="input w-full" inputMode="tel" autoComplete="tel" value={phone}
+                onChange={(e) => setPhone(e.target.value)} placeholder="09012345678" required />
+            </div>
+            <div>
+              <div className="label">メールアドレス *</div>
+              <input className="input w-full" type="email" autoComplete="email" value={email}
+                onChange={(e) => setEmail(e.target.value)} placeholder="taro@example.com" required />
+              <p className="text-[10px] text-muted mt-1">登録完了メール・各種ご案内をお送りします</p>
+            </div>
+            <div>
+              <div className="label">ご利用開始日 *</div>
+              <input className="input w-full" type="date" value={serviceStart}
+                onChange={(e) => setServiceStart(e.target.value)} required />
+              <p className="text-[10px] text-muted mt-1">
+                ご利用開始月とその翌月は無料。翌々月（3ヶ月目）から月額のお支払いが始まります。
+              </p>
+            </div>
 
-      {/* 3. 氏名・電話・メール(必須)・ご利用開始日 (§①②) */}
-      {step === 2 && (
-        <div className="space-y-3">
-          <div>
-            <div className="label">お名前 *</div>
-            <div className="grid grid-cols-2 gap-2">
-              <input className="input w-full" value={lastName} onChange={(e) => setLastName(e.target.value)}
-                autoComplete="family-name" placeholder="姓（山田）" required />
-              <input className="input w-full" value={firstName} onChange={(e) => setFirstName(e.target.value)}
-                autoComplete="given-name" placeholder="名（太郎）" required />
+            {/* 規約リンク（申込プランの利用規約）＋同意チェック */}
+            <div className="pt-1">
+              <a href={termsHref} target="_blank" rel="noreferrer"
+                 className="inline-flex items-center gap-1 text-[13px] text-accent underline font-medium">
+                「{plan?.name ?? "本プラン"}」の利用規約を確認する<ExternalLink size={12} />
+              </a>
+              <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
+                <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
+                <span>利用規約の内容を確認し、同意します（毎月の継続課金・解約はいつでも可能／規約バージョン: {termsVersion}）</span>
+              </label>
             </div>
           </div>
-          <div>
-            <div className="label">電話番号 *</div>
-            <input className="input w-full" inputMode="tel" autoComplete="tel" value={phone}
-              onChange={(e) => setPhone(e.target.value)} placeholder="09012345678" required />
-          </div>
-          <div>
-            <div className="label">メールアドレス *</div>
-            <input className="input w-full" type="email" autoComplete="email" value={email}
-              onChange={(e) => setEmail(e.target.value)} placeholder="taro@example.com" required />
-            <p className="text-[10px] text-muted mt-1">登録完了メール・各種ご案内をお送りします</p>
-          </div>
-          <div>
-            <div className="label">ご利用開始日 *</div>
-            <input className="input w-full" type="date" value={serviceStart}
-              onChange={(e) => setServiceStart(e.target.value)} required />
-            <p className="text-[10px] text-muted mt-1">
-              ご利用開始月とその翌月は無料。翌々月（3ヶ月目）から月額のお支払いが始まります。
-            </p>
-          </div>
-        </div>
-      )}
+        )}
 
-      {/* 4. 支払方法 (§1.1-4 / §2.1) + カード入力 */}
-      {step === 3 && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setMethod("card")} className={
-              "p-3 rounded-xl border text-sm flex items-center gap-2 justify-center transition-colors " +
-              (method === "card" ? "border-navy bg-navy/5 font-medium" : "border-border text-muted")
-            }>
-              <CreditCard size={15} />クレジットカード
-            </button>
-            {/* 口座振替はカードと別サービス・別フロー。仕様確定後に別系統で追加 (§2.1) */}
-            <button type="button" disabled className="p-3 rounded-xl border border-border text-sm flex items-center gap-2 justify-center text-muted/50 cursor-not-allowed">
-              <Landmark size={15} />口座振替 (準備中)
-            </button>
-          </div>
-
-          {method === "card" && (
-            <>
+        {/* カード入力 (クレジットカードのみ) */}
+        {cur === "pay" && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-sm text-muted">
+              <CreditCard size={15} className="text-navy" />お支払いはクレジットカードです
+            </div>
+            <div>
+              <div className="label flex items-center gap-1"><CreditCard size={13} />カード番号</div>
+              <input className="input w-full font-mono" inputMode="numeric" autoComplete="cc-number"
+                placeholder="4111 1111 1111 1111" value={number}
+                onChange={(e) => setNumber(formatCardNumber(e.target.value))}
+                maxLength={23} required />
+              {(() => {
+                const digits = number.replace(/\D/g, "");
+                return digits.length > 0 && digits.length < 14
+                  ? <p className="text-[11px] text-bad mt-1">カード番号は通常14〜16桁です (現在 {digits.length} 桁)</p>
+                  : null;
+              })()}
+            </div>
+            <div className="grid grid-cols-3 gap-2">
               <div>
-                <div className="label flex items-center gap-1"><CreditCard size={13} />カード番号</div>
-                <input className="input w-full font-mono" inputMode="numeric" autoComplete="cc-number"
-                  placeholder="4111 1111 1111 1111" value={number}
-                  onChange={(e) => setNumber(formatCardNumber(e.target.value))}
-                  maxLength={23} required />
-                {(() => {
-                  const digits = number.replace(/\D/g, "");
-                  return digits.length > 0 && digits.length < 14
-                    ? <p className="text-[11px] text-bad mt-1">カード番号は通常14〜16桁です (現在 {digits.length} 桁)</p>
-                    : null;
-                })()}
+                <div className="label">月</div>
+                <input className="input w-full" inputMode="numeric" placeholder="MM" maxLength={2}
+                  value={expMonth} onChange={(e) => setExpMonth(e.target.value)} required />
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <div className="label">月</div>
-                  <input className="input w-full" inputMode="numeric" placeholder="MM" maxLength={2}
-                    value={expMonth} onChange={(e) => setExpMonth(e.target.value)} required />
-                </div>
-                <div>
-                  <div className="label">年</div>
-                  <input className="input w-full" inputMode="numeric" placeholder="YYYY" maxLength={4}
-                    value={expYear} onChange={(e) => setExpYear(e.target.value)} required />
-                </div>
-                <div>
-                  <div className="label">セキュリティコード</div>
-                  <input className="input w-full" inputMode="numeric" autoComplete="cc-csc" placeholder="123"
-                    maxLength={4} value={cvc} onChange={(e) => setCvc(e.target.value)} required />
-                </div>
+              <div>
+                <div className="label">年</div>
+                <input className="input w-full" inputMode="numeric" placeholder="YYYY" maxLength={4}
+                  value={expYear} onChange={(e) => setExpYear(e.target.value)} required />
               </div>
-            </>
-          )}
-
-          {plan && (
-            <div className="text-xs text-muted bg-bg rounded-lg p-2.5">
-              お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()} (本日初回課金)
+              <div>
+                <div className="label">セキュリティコード</div>
+                <input className="input w-full" inputMode="numeric" autoComplete="cc-csc" placeholder="123"
+                  maxLength={4} value={cvc} onChange={(e) => setCvc(e.target.value)} required />
+              </div>
             </div>
+            {plan && (
+              <div className="text-xs text-muted bg-bg rounded-lg p-2.5">
+                お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()}（利用開始月＋翌月は無料）
+              </div>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <div className="flex items-start gap-2 text-sm text-bad">
+            <AlertCircle size={15} className="shrink-0 mt-0.5" /><span className="whitespace-pre-line break-all">{error}</span>
+          </div>
+        )}
+
+        {/* ナビゲーション */}
+        <div className="flex items-center gap-2">
+          {idx > 0 && (
+            <button type="button" onClick={() => { setError(null); setIdx(idx - 1); }}
+              className="btn flex items-center gap-1"><ChevronLeft size={14} />戻る</button>
+          )}
+          {!isLast ? (
+            <button type="button" disabled={!canNext}
+              onClick={() => setIdx(idx + 1)}
+              className="btn btn-primary flex-1 flex items-center justify-center gap-1 disabled:opacity-40">
+              次へ<ChevronRight size={14} />
+            </button>
+          ) : (
+            <button className="btn btn-primary flex-1 flex items-center justify-center gap-2" disabled={busy}>
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Lock size={15} />}
+              {busy ? "処理中…" : "申し込む"}
+            </button>
           )}
         </div>
-      )}
 
-      {error && (
-        <div className="flex items-start gap-2 text-sm text-bad">
-          <AlertCircle size={15} className="shrink-0 mt-0.5" /><span className="whitespace-pre-line break-all">{error}</span>
-        </div>
-      )}
+        <p className="text-[11px] text-muted flex items-center gap-1 justify-center">
+          <Lock size={11} />カード情報は当社サーバーを経由せず決済代行会社へ直接送信されます
+        </p>
+      </form>
 
-      {/* ナビゲーション */}
-      <div className="flex items-center gap-2">
-        {step > minStep && (
-          <button type="button" onClick={() => { setError(null); setStep(step - 1); }}
-            className="btn flex items-center gap-1"><ChevronLeft size={14} />戻る</button>
-        )}
-        {step < STEPS.length - 1 ? (
-          <button type="button" disabled={!canNext}
-            onClick={() => setStep(step + 1)}
-            className="btn btn-primary flex-1 flex items-center justify-center gap-1 disabled:opacity-40">
-            次へ<ChevronRight size={14} />
-          </button>
-        ) : (
-          <button className="btn btn-primary flex-1 flex items-center justify-center gap-2" disabled={busy}>
-            {busy ? <Loader2 size={16} className="animate-spin" /> : <Lock size={15} />}
-            {busy ? "処理中…" : "同意して申し込む"}
-          </button>
-        )}
-      </div>
-
-      <p className="text-[11px] text-muted flex items-center gap-1 justify-center">
-        <Lock size={11} />カード情報は当社サーバーを経由せず決済代行会社へ直接送信されます
+      {/* 特定商取引法に基づく表記 (申込フォーム外・念のため) */}
+      <p className="text-[11px] text-muted text-center mt-3">
+        <a href="/legal/tokusho" target="_blank" rel="noreferrer" className="text-accent underline">
+          特定商取引法に基づく表記
+        </a>
       </p>
-    </form>
+    </>
   );
 }

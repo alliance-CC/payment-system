@@ -83,8 +83,8 @@ export default async function AdminBoardPage({
               <input type="month" name="month" defaultValue={month} className="input" />
             </div>
             <div>
-              <div className="label mb-1 flex items-center gap-1"><Search size={11} />会員ID / お客様名</div>
-              <input type="search" name="q" defaultValue={q} placeholder="MR… または 氏名" className="input w-52" />
+              <div className="label mb-1 flex items-center gap-1"><Search size={11} />会員ID / お客様名 / カナ</div>
+              <input type="search" name="q" defaultValue={q} placeholder="MR… / 氏名 / カナ" className="input w-52" />
             </div>
             <input type="hidden" name="status" value={status} />
             <button className="btn btn-primary">表示</button>
@@ -149,6 +149,7 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2">{billingBadge(r.monthBilling)}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.name ?? "-"}</div>
+                    {r.nameKana && <div className="text-[11px] text-muted">{r.nameKana}</div>}
                     <div className="text-[11px] text-muted">{r.phone ?? "-"}{r.email ? ` / ${r.email}` : ""}</div>
                   </td>
                   <td className="px-3 py-2 text-muted">{r.paymentMethod}</td>
