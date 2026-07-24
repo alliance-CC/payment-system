@@ -5,6 +5,7 @@
 // 文言は支給された確定版(terms-data.ts)を保持し、改変しない。
 import Link from "next/link";
 import type { PlanTerms } from "./terms-data";
+import CloseTabButton from "./CloseTabButton";
 
 // 列挙・箇条書き始まりの行はぶら下げインデントで見やすくする
 const ENUM = /^(（?[0-9０-９]+）|\([0-9０-９]+\)|[①-⑳]|[０-９1-9][．.]|[（(][ア-ンア-ヶ][）)])/;
@@ -14,17 +15,18 @@ const TABS: { id: "plus" | "premium"; label: string }[] = [
   { id: "premium", label: "暮らし安心プレミアム" },
 ];
 
-export default function TermsView({ terms, backHref }: { terms: PlanTerms; backHref?: string }) {
+export default function TermsView({ terms, fromSubscribe }: { terms: PlanTerms; fromSubscribe?: boolean }) {
   return (
     <main className="max-w-3xl mx-auto px-4 py-8 md:py-12">
-      <div className="flex items-center gap-3">
-        {backHref && (
-          <a href={backHref} className="inline-flex items-center gap-1 text-sm font-medium text-white bg-navy rounded-full px-3 py-1.5 hover:bg-navy/90">
-            ← お申し込みに戻る
-          </a>
-        )}
+      <div className="flex items-center gap-3 flex-wrap">
+        {fromSubscribe && <CloseTabButton />}
         <Link href="/legal/terms" className="text-xs text-muted hover:text-ink">利用規約トップ</Link>
       </div>
+      {fromSubscribe && (
+        <p className="text-[11px] text-muted mt-1.5">
+          ※ 確認できたら「お申し込みに戻る」を押すか、このタブを閉じてください。お申し込み画面の入力内容はそのまま残っています。
+        </p>
+      )}
       <h1 className="text-2xl md:text-3xl font-bold text-navy mt-2">{terms.serviceName} ご利用規約</h1>
 
       {/* プラン切替 */}
@@ -119,11 +121,9 @@ export default function TermsView({ terms, backHref }: { terms: PlanTerms; backH
 
       {terms.enacted && <p className="text-xs text-muted mt-4">{terms.enacted}</p>}
 
-      {backHref && (
+      {fromSubscribe && (
         <div className="mt-6">
-          <a href={backHref} className="inline-flex items-center gap-1 text-sm font-medium text-white bg-navy rounded-full px-4 py-2 hover:bg-navy/90">
-            ← お申し込みに戻る
-          </a>
+          <CloseTabButton />
         </div>
       )}
     </main>
