@@ -34,7 +34,7 @@ export default function TermsView({ terms, fromSubscribe }: { terms: PlanTerms; 
         {TABS.map((t) => (
           <Link
             key={t.id}
-            href={`/legal/terms/${t.id}`}
+            href={`/legal/terms/${t.id}${fromSubscribe ? "?from=subscribe" : ""}`}
             className={
               "px-3 py-1.5 rounded-full text-sm font-medium border transition-colors " +
               (t.id === terms.planId

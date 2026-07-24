@@ -1,6 +1,6 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getServiceStartMap, getContractNameKanaMap } from "./store";
+import { getServiceStartMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
@@ -15,7 +15,6 @@ export type RegistrantRow = {
   statusLabel: "利用前" | "利用中" | "解約";
   rawStatus: string;        // active/delinquent/suspended/canceled/card_expired
   name: string | null;
-  nameKana: string | null;  // フリガナ (カタカナ)
   phone: string | null;
   email: string | null;
   consented: boolean;       // 利用規約 同意済み
@@ -52,8 +51,6 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
 
   // 利用開始日 (選択値。列 p001 未適用なら空 → 申込日から推定)
   const ssMap = await getServiceStartMap(ids);
-  // フリガナ (列 p002 未適用なら空)
-  const kanaMap = await getContractNameKanaMap(ids);
 
   // 同意記録の有無 (account_id 単位)
   const { data: consents } = await svc.from("payment_consents").select("account_id");
@@ -121,7 +118,6 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
       statusLabel,
       rawStatus: c.status,
       name: c.contact_name,
-      nameKana: kanaMap.get(c.id) ?? null,
       phone: c.contact_phone,
       email: c.contact_email,
       consented: consentSet.has(c.account_id),
@@ -141,7 +137,7 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
       (r) =>
         r.accountId.toLowerCase().includes(q) ||
         (r.name ?? "").toLowerCase().includes(q) ||
-        (r.nameKana ?? "").toLowerCase().includes(q),
+        (r.phone ?? "").toLowerCase().includes(q),
     );
   }
 
