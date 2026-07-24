@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Users, LogOut, ArrowLeft } from "lucide-react";
+import { Users, LogOut, Download } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
-import { loadRevenue } from "@/features/payments/revenue-query";
+import { loadRevenue, type RevenueUser } from "@/features/payments/revenue-query";
 import { todayJst } from "@/features/payments/billing-config";
 import { logoutAction } from "../actions";
 
@@ -9,6 +9,13 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "売上予測 | Memoreal Payments" };
 
 const yen = (n: number) => "¥" + n.toLocaleString();
+
+function stateBadge(s: RevenueUser["monthState"]) {
+  const map: Record<RevenueUser["monthState"], string> = {
+    "確定": "chip-good", "課金予定": "chip-navy", "無料": "chip",
+  };
+  return <span className={`chip ${map[s]}`}>{s}</span>;
+}
 
 export default async function RevenuePage({
   searchParams,
@@ -25,9 +32,10 @@ export default async function RevenuePage({
         <header className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-navy">売上予測ボード</h1>
-            <p className="text-xs text-muted">その月の利用者・売上の「確定」と「予定」(解約は解約月から除外)</p>
+            <p className="text-xs text-muted">その月の利用者・売上の「確定」と「予定」（無料期間中は¥0で表示／解約は翌月から対象外）</p>
           </div>
           <div className="flex items-center gap-2">
+            <a href={`/admin/revenue/export?month=${month}`} className="btn flex items-center gap-1"><Download size={14} />当月利用者CSV</a>
             <Link href={`/admin?month=${month}`} className="btn flex items-center gap-1"><Users size={14} />登録者ボード</Link>
             <form action={logoutAction}><button className="btn flex items-center gap-1"><LogOut size={14} />ログアウト</button></form>
           </div>
@@ -45,11 +53,11 @@ export default async function RevenuePage({
         </div>
 
         {/* 当月サマリ */}
-        <div className="grid sm:grid-cols-3 gap-3">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div className="card p-4">
             <div className="text-xs text-muted">当月 売上予定 ({month})</div>
             <div className="text-2xl font-bold text-navy mt-1">{yen(b.monthProjected)}</div>
-            <div className="text-[11px] text-muted mt-1">継続課金の見込み(クレジットカード)</div>
+            <div className="text-[11px] text-muted mt-1">課金対象の月額合計（無料期間は除く）</div>
           </div>
           <div className="card p-4">
             <div className="text-xs text-muted">当月 売上確定 ({month})</div>
@@ -58,8 +66,13 @@ export default async function RevenuePage({
           </div>
           <div className="card p-4">
             <div className="text-xs text-muted">当月 利用者数</div>
-            <div className="text-2xl font-bold text-ink mt-1">{b.users.length} 名</div>
-            <div className="text-[11px] text-muted mt-1">利用中/利用予定の合計</div>
+            <div className="text-2xl font-bold text-ink mt-1">{b.usingCount} 名</div>
+            <div className="text-[11px] text-muted mt-1">在籍（利用中/利用予定・無料期間含む）</div>
+          </div>
+          <div className="card p-4">
+            <div className="text-xs text-muted">当月 課金対象</div>
+            <div className="text-2xl font-bold text-navy mt-1">{b.billingCount} 名</div>
+            <div className="text-[11px] text-muted mt-1">無料期間を終え課金が発生する人数</div>
           </div>
         </div>
 
@@ -72,7 +85,7 @@ export default async function RevenuePage({
                 <th className="px-3 py-2 font-medium">会員ID</th>
                 <th className="px-3 py-2 font-medium">お客様</th>
                 <th className="px-3 py-2 font-medium">プラン</th>
-                <th className="px-3 py-2 font-medium">月額</th>
+                <th className="px-3 py-2 font-medium">プラン月額</th>
                 <th className="px-3 py-2 font-medium">利用状況</th>
                 <th className="px-3 py-2 font-medium">当月課金</th>
               </tr>
@@ -82,11 +95,14 @@ export default async function RevenuePage({
               {b.users.map((u) => (
                 <tr key={u.accountId} className="border-b border-border/60">
                   <td className="px-3 py-2 font-mono text-xs">{u.accountId}</td>
-                  <td className="px-3 py-2">{u.name ?? "-"}</td>
+                  <td className="px-3 py-2">
+                    <div>{u.name ?? "-"}</div>
+                    {u.nameKana && <div className="text-[11px] text-muted">{u.nameKana}</div>}
+                  </td>
                   <td className="px-3 py-2">{u.planName}</td>
-                  <td className="px-3 py-2">{yen(u.amount)}</td>
+                  <td className="px-3 py-2">{yen(u.planAmount)}</td>
                   <td className="px-3 py-2"><span className={"chip " + (u.usageLabel === "利用中" ? "chip-good" : "chip-navy")}>{u.usageLabel}</span></td>
-                  <td className="px-3 py-2">{u.billed ? <span className="chip chip-good">確定</span> : <span className="chip">予定</span>}</td>
+                  <td className="px-3 py-2">{stateBadge(u.monthState)}</td>
                 </tr>
               ))}
             </tbody>
@@ -122,8 +138,8 @@ export default async function RevenuePage({
         </div>
 
         <p className="text-[11px] text-muted">
-          ※ 予定=その月に課金対象となる契約の月額合計(継続課金の見込み)。確定=その月に実際に課金成功した金額。
-          解約された契約は解約月から集計対象外です。カード等の決済個人情報は表示していません。
+          ※ 予定=その月に課金対象となる契約の月額合計（無料期間中は¥0）。確定=その月に実際に課金成功した金額。
+          解約された契約は「解約月の翌月」から集計対象外です（解約月は在籍＝当月まで課金対象）。カード等の決済個人情報は表示していません。
         </p>
       </div>
     </main>

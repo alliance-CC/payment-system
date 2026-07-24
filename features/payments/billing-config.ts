@@ -34,7 +34,7 @@ export function getBillingPolicy(): BillingPolicy {
     cardExpiredCodePrefixes: (process.env.VT_CARD_EXPIRED_CODES ?? "")
       .split(",").map((s) => s.trim()).filter(Boolean),
     notifyEmail: process.env.PAYMENTS_NOTIFY_EMAIL || null,
-    termsVersion: process.env.PAYMENTS_TERMS_VERSION || "draft-2026-07",
+    termsVersion: process.env.PAYMENTS_TERMS_VERSION || "2026-07-01",
     cronBatchLimit: Math.max(1, parseInt(process.env.VT_CRON_BATCH_LIMIT ?? "200", 10) || 200),
     use3ds: String(process.env.VT_USE_3DS ?? "false").toLowerCase() === "true",
     // 既定 2 ヶ月無料 (申込月含む)。OEM/確定変更は PAYMENTS_FREE_MONTHS で上書き (§1.2/§10)。

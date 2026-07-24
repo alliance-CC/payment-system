@@ -3,8 +3,9 @@ import { LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingU
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { todayJst } from "@/features/payments/billing-config";
-import { cancelAction, logoutAction } from "./actions";
+import { cancelAction, deleteAction, logoutAction } from "./actions";
 import CancelButton from "./CancelButton";
+import DeleteButton from "./DeleteButton";
 import CopyButton from "./CopyButton";
 
 export const dynamic = "force-dynamic";
@@ -37,13 +38,21 @@ function statusBadge(v: RegistrantRow["statusLabel"]) {
 export default async function AdminBoardPage({
   searchParams,
 }: {
-  searchParams: { month?: string; status?: string; q?: string };
+  searchParams: { month?: string; status?: string; q?: string; del?: string };
 }) {
   requireAdmin();
 
   const month = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : todayJst().slice(0, 7);
   const status = searchParams.status ?? "all";
   const q = searchParams.q ?? "";
+  const del = searchParams.del ?? "";
+  const delMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: "案件を完全に削除しました。", ok: true },
+    err: { text: "削除に失敗しました。時間をおいて再度お試しください。", ok: false },
+    "not-found": { text: "対象の案件が見つかりませんでした。", ok: false },
+    mismatch: { text: "会員IDが一致しなかったため削除を中止しました。", ok: false },
+    blocked: { text: "本番環境では削除がロックされています（環境変数 PAYMENTS_ALLOW_DELETE=true が必要）。", ok: false },
+  };
   const { rows, counts } = await loadBoard({ month, status, q });
   const exportQs = new URLSearchParams({ month, status, q }).toString();
 
@@ -60,8 +69,8 @@ export default async function AdminBoardPage({
             <Link href={`/admin/revenue?month=${month}`} className="btn btn-primary flex items-center gap-1">
               <TrendingUp size={14} />売上予測ボード
             </Link>
-            <a href={`/admin/export?${exportQs}`} className="btn flex items-center gap-1">
-              <Download size={14} />CSV出力
+            <a href={`/admin/export?${exportQs}`} className="btn flex items-center gap-1" title="現在の絞り込み（状況タブ・検索）を反映して出力します">
+              <Download size={14} />CSV出力（絞り込み反映）
             </a>
             <Link href={`/admin?month=${month}&status=${status}&q=${encodeURIComponent(q)}`} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
@@ -74,6 +83,13 @@ export default async function AdminBoardPage({
             </form>
           </div>
         </header>
+
+        {/* 削除結果の通知 */}
+        {del && delMsg[del] && (
+          <div className={"card p-3 text-sm " + (delMsg[del].ok ? "text-good" : "text-bad")}>
+            {delMsg[del].text}
+          </div>
+        )}
 
         {/* サマリ + 月選択 */}
         <div className="card p-4 flex flex-wrap items-center gap-4">
@@ -156,15 +172,21 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2">{r.consented ? <span className="chip chip-good">同意済</span> : <span className="chip chip-bad">未同意</span>}</td>
                   <td className="px-3 py-2 text-muted">{r.canceledAt ?? "-"}</td>
                   <td className="px-3 py-2">
-                    {r.rawStatus !== "canceled" ? (
-                      <form action={cancelAction}>
+                    <div className="flex items-center gap-1.5">
+                      {r.rawStatus !== "canceled" && (
+                        <form action={cancelAction}>
+                          <input type="hidden" name="accountId" value={r.accountId} />
+                          <input type="hidden" name="month" value={month} />
+                          <CancelButton name={r.name} />
+                        </form>
+                      )}
+                      <form action={deleteAction}>
                         <input type="hidden" name="accountId" value={r.accountId} />
                         <input type="hidden" name="month" value={month} />
-                        <CancelButton name={r.name} />
+                        <input type="hidden" name="confirm" value="" />
+                        <DeleteButton accountId={r.accountId} />
                       </form>
-                    ) : (
-                      <span className="text-[11px] text-muted">-</span>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -174,6 +196,9 @@ export default async function AdminBoardPage({
 
         <p className="text-[11px] text-muted">
           ※ カード番号・有効期限・セキュリティコード等の決済個人情報はこの画面・DB・ログのいずれにも保持していません (ブラウザ→決済代行会社へ直接送信)。
+        </p>
+        <p className="text-[11px] text-muted">
+          ※「削除」は案件をDBから完全に削除し取り消せません（会員IDの入力確認が必要）。テスト案件の整理用です。本番環境では環境変数 <code className="font-mono">PAYMENTS_ALLOW_DELETE=true</code> を設定しない限りロックされます。解約は「解約」をご利用ください。
         </p>
       </div>
     </main>

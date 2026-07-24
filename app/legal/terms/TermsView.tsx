@@ -14,10 +14,17 @@ const TABS: { id: "plus" | "premium"; label: string }[] = [
   { id: "premium", label: "暮らし安心プレミアム" },
 ];
 
-export default function TermsView({ terms }: { terms: PlanTerms }) {
+export default function TermsView({ terms, backHref }: { terms: PlanTerms; backHref?: string }) {
   return (
     <main className="max-w-3xl mx-auto px-4 py-8 md:py-12">
-      <Link href="/legal/terms" className="text-xs text-muted hover:text-ink">← 利用規約トップ</Link>
+      <div className="flex items-center gap-3">
+        {backHref && (
+          <a href={backHref} className="inline-flex items-center gap-1 text-sm font-medium text-white bg-navy rounded-full px-3 py-1.5 hover:bg-navy/90">
+            ← お申し込みに戻る
+          </a>
+        )}
+        <Link href="/legal/terms" className="text-xs text-muted hover:text-ink">利用規約トップ</Link>
+      </div>
       <h1 className="text-2xl md:text-3xl font-bold text-navy mt-2">{terms.serviceName} ご利用規約</h1>
 
       {/* プラン切替 */}
@@ -105,12 +112,20 @@ export default function TermsView({ terms }: { terms: PlanTerms }) {
         </dl>
         <p className="text-[11px] text-muted mt-2">
           販売条件等の詳細は
-          <Link href="/legal/tokusho" className="text-accent hover:underline mx-0.5">特定商取引法に基づく表記</Link>
+          <a href="https://lifeap.co.jp/tokutei/" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline mx-0.5">特定商取引法に基づく表記</a>
           をご覧ください。
         </p>
       </div>
 
       {terms.enacted && <p className="text-xs text-muted mt-4">{terms.enacted}</p>}
+
+      {backHref && (
+        <div className="mt-6">
+          <a href={backHref} className="inline-flex items-center gap-1 text-sm font-medium text-white bg-navy rounded-full px-4 py-2 hover:bg-navy/90">
+            ← お申し込みに戻る
+          </a>
+        </div>
+      )}
     </main>
   );
 }

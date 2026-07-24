@@ -6,8 +6,8 @@ import { ArrowRight } from "lucide-react";
 export const metadata = { title: "利用規約 — 株式会社ライフアップ" };
 
 const PLANS = [
-  { id: "plus", name: "暮らし安心プラス", desc: "近隣トラブル解決支援まもるん ／ ネットライフサポート", price: "月額 ¥1,320（税込・税抜¥1,200）" },
-  { id: "premium", name: "暮らし安心プレミアム", desc: "プラスの内容 ＋ データ復旧 ／ セキュリティ", price: "月額 ¥1,870（税込・税抜¥1,700）" },
+  { id: "plus", name: "暮らし安心プラス", desc: "近隣トラブル解決支援まもるん ／ ネットライフサポート", price: "月額 ¥1,320（税込）" },
+  { id: "premium", name: "暮らし安心プレミアム", desc: "プラスの内容 ＋ データ復旧 ／ セキュリティ", price: "月額 ¥1,870（税込）" },
 ];
 
 export default function TermsIndexPage() {
@@ -36,7 +36,7 @@ export default function TermsIndexPage() {
       </div>
 
       <div className="mt-8 text-sm">
-        <Link href="/legal/tokusho" className="text-accent hover:underline">特定商取引法に基づく表記</Link>
+        <a href="https://lifeap.co.jp/tokutei/" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">特定商取引法に基づく表記</a>
       </div>
 
       <div className="card p-4 mt-6 text-[13px] text-ink">

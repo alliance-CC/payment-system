@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
 import { cancelSubscription } from "@/features/payments/billing";
+import { hardDeleteContractByAccountId } from "@/features/payments/store";
 import { savePaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
 export async function loginAction(formData: FormData): Promise<void> {
@@ -31,6 +32,27 @@ export async function cancelAction(formData: FormData): Promise<void> {
   if (accountId) await cancelSubscription(accountId);
   const month = String(formData.get("month") ?? "");
   redirect(`/admin${month ? `?month=${encodeURIComponent(month)}` : ""}`);
+}
+
+// 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。
+//   二重の歯止め: ①確認入力(会員ID一致) ②本番環境では PAYMENTS_ALLOW_DELETE=true が必須。
+export async function deleteAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const confirm = String(formData.get("confirm") ?? "").trim();
+  const month = String(formData.get("month") ?? "");
+  const to = (status: string) => `/admin?${month ? `month=${encodeURIComponent(month)}&` : ""}del=${status}`;
+
+  // ① 確認: 入力された会員IDが対象と一致しない削除は実行しない
+  if (!accountId || confirm !== accountId) redirect(to("mismatch"));
+
+  // ② 本番ガード: 本番環境 (VT_PRODUCTION=true) では PAYMENTS_ALLOW_DELETE=true が無い限り削除不可
+  const isProd = String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true";
+  const allowDelete = String(process.env.PAYMENTS_ALLOW_DELETE ?? "").toLowerCase() === "true";
+  if (isProd && !allowDelete) redirect(to("blocked"));
+
+  const res = await hardDeleteContractByAccountId(accountId);
+  redirect(to(res.ok ? "ok" : "err"));
 }
 
 // 課金設定の保存 (金額/プラン・無料期間・継続課金・解約ポリシー)。DB(integrations)へ。
@@ -63,7 +85,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     cardExpiredCodes: list("cardExpiredCodes"),
     cronBatchLimit: Math.max(1, num("cronBatchLimit", 200)),
     notifyEmail: String(formData.get("notifyEmail") ?? "").trim() || null,
-    termsVersion: String(formData.get("termsVersion") ?? "").trim() || "draft-2026-07",
+    termsVersion: String(formData.get("termsVersion") ?? "").trim() || "2026-07-01",
     cancelPolicy: String(formData.get("cancelPolicy")) === "immediate" ? "immediate" : "end_of_month",
     welcomeEmail: {
       subject: String(formData.get("welcome_subject") ?? "").trim(),
