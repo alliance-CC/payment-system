@@ -60,8 +60,8 @@ export default async function AdminBoardPage({
             <Link href={`/admin/revenue?month=${month}`} className="btn btn-primary flex items-center gap-1">
               <TrendingUp size={14} />売上予測ボード
             </Link>
-            <a href={`/admin/export?${exportQs}`} className="btn flex items-center gap-1">
-              <Download size={14} />CSV出力
+            <a href={`/admin/export?${exportQs}`} className="btn flex items-center gap-1" title="現在の絞り込み（状況タブ・検索）を反映して出力します">
+              <Download size={14} />CSV出力（絞り込み反映）
             </a>
             <Link href={`/admin?month=${month}&status=${status}&q=${encodeURIComponent(q)}`} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
