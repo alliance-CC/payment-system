@@ -1,6 +1,6 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getServiceStartMap, getContractNameKanaMap } from "./store";
+import { getServiceStartMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 
 // 売上予測ボードの集計 (クレジットカードのみ)。カード等の決済個人情報は含めない (§7)。
@@ -11,7 +11,6 @@ import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 export type RevenueUser = {
   accountId: string;
   name: string | null;
-  nameKana: string | null;
   planName: string;
   planAmount: number;                       // プラン月額 (参考)
   usageLabel: "利用中" | "利用予定";          // 本日時点で利用開始済みか
@@ -49,7 +48,6 @@ export async function loadRevenue(opts: { month: string }): Promise<RevenueBoard
   const rowsRaw = contracts ?? [];
   const ids = rowsRaw.map((c: any) => c.id);
   const ssMap = await getServiceStartMap(ids);
-  const kanaMap = await getContractNameKanaMap(ids);
 
   // 当年の課金成功額 (確定) を月×契約で集計
   const { data: charges } = ids.length
@@ -116,7 +114,6 @@ export async function loadRevenue(opts: { month: string }): Promise<RevenueBoard
     users.push({
       accountId: m.c.account_id,
       name: m.c.contact_name ?? null,
-      nameKana: kanaMap.get(m.c.id) ?? null,
       planName: m.c.plan_name ?? m.c.plan_id ?? "",
       planAmount,
       usageLabel: m.serviceStartMonth && m.serviceStartMonth > curMonth ? "利用予定" : "利用中",

@@ -14,7 +14,7 @@ import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
-  insertConsent, updateServiceStartDate, updateContractNameKana, type ContractRow,
+  insertConsent, updateServiceStartDate, type ContractRow,
 } from "./store";
 import {
   loadBillingPolicy, DEFAULT_TENANT_ID,
@@ -29,7 +29,6 @@ export type SubscribeInput = {
   tenantId?: string | null;         // OEM: ?tenant= で解決したテナント。無指定は既定テナント
   planId: string;
   name: string;
-  nameKana?: string | null;         // フリガナ (カタカナ)。管理表示・通知に使用
   phone: string;
   email?: string | null;
   paymentMethod: "card";            // 口座振替は仕様確定後に別系統で追加 (§2.1)
@@ -201,9 +200,8 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
     });
   }
 
-  // 利用開始日・フリガナを保存 (列 p001/p002 未適用でも申込は失敗させない)。
+  // 利用開始日を保存 (列 p001 未適用でも申込は失敗させない)。
   await updateServiceStartDate(contract.id, serviceStart);
-  await updateContractNameKana(contract.id, input.nameKana ?? null);
 
   // 初回課金の記録 (orderId 一意)。無料期間ありは申込時に課金していないため記録しない
   // — 初回の実課金は無料期間終了後 (初回課金日) に日次 Cron が行い、そこで charge 行が作られる。
@@ -255,7 +253,7 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   // 登録通知メール (§1.1-5: 自社宛。顧客情報・契約プラン・会員ID)
   await notifyRegistration(tenantId, {
     accountId, planName: plan.name, amount: plan.amount,
-    name: input.name, nameKana: input.nameKana ?? null, phone: input.phone, email: input.email ?? null,
+    name: input.name, phone: input.phone, email: input.email ?? null,
     firstChargeDate: useFreePeriod ? nextChargeDate : null,
   });
 
@@ -315,7 +313,7 @@ async function sendWelcomeEmail(
 
 async function notifyRegistration(
   tenantId: string,
-  info: { accountId: string; planName: string; amount: number; name: string; nameKana?: string | null; phone: string; email: string | null; firstChargeDate?: string | null },
+  info: { accountId: string; planName: string; amount: number; name: string; phone: string; email: string | null; firstChargeDate?: string | null },
 ): Promise<void> {
   const policy = await loadBillingPolicy();
   if (!policy.notifyEmail) return;   // TODO(§10): 宛先確定後に必須化
@@ -328,7 +326,6 @@ async function notifyRegistration(
       ? `課金開始 (無料期間終了後の初回課金日): ${info.firstChargeDate}`
       : "初回課金: 申込時に実施済み",
     `氏名: ${info.name}`,
-    `フリガナ: ${info.nameKana || "(未取得)"}`,
     `電話番号: ${info.phone}`,
     `メール: ${info.email ?? "(未取得)"}`,
   ].join("\n");

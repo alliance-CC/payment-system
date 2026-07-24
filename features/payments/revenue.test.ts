@@ -19,7 +19,6 @@ vi.mock("@/shared/db/service", () => ({
 }));
 vi.mock("./store", () => ({
   getServiceStartMap: async () => state.ss,
-  getContractNameKanaMap: async () => new Map(),
 }));
 vi.mock("./billing-config", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./billing-config")>();

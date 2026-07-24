@@ -95,10 +95,7 @@ export default async function RevenuePage({
               {b.users.map((u) => (
                 <tr key={u.accountId} className="border-b border-border/60">
                   <td className="px-3 py-2 font-mono text-xs">{u.accountId}</td>
-                  <td className="px-3 py-2">
-                    <div>{u.name ?? "-"}</div>
-                    {u.nameKana && <div className="text-[11px] text-muted">{u.nameKana}</div>}
-                  </td>
+                  <td className="px-3 py-2">{u.name ?? "-"}</td>
                   <td className="px-3 py-2">{u.planName}</td>
                   <td className="px-3 py-2">{yen(u.planAmount)}</td>
                   <td className="px-3 py-2"><span className={"chip " + (u.usageLabel === "利用中" ? "chip-good" : "chip-navy")}>{u.usageLabel}</span></td>

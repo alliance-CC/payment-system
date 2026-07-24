@@ -1,6 +1,6 @@
 "use client";
 // 継続課金の申込フロー (§1.1 確定・短縮版):
-//   (プラン=LPから確定) → 1. お客様情報(氏名・フリガナ・電話・メール・利用開始日・規約同意)
+//   (プラン=LPから確定) → 1. お客様情報(氏名・電話・メール・利用開始日・規約同意)
 //                        → 2. カード入力 → 完了
 //   カード番号は tokenize.ts でブラウザ→VeriTrans 直送 (サーバー非通過 §2/§7)。
 import { useState } from "react";
@@ -28,11 +28,6 @@ function defaultServiceStart(): string {
 function isEmail(s: string): boolean {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s.trim());
 }
-// 全角カタカナ(＋長音符・中黒・空白)のみ許可。
-const KATAKANA = /^[ァ-ヶー・\s]+$/;
-function isKatakana(s: string): boolean {
-  return s.trim() !== "" && KATAKANA.test(s.trim());
-}
 
 export default function SignupFlow({
   plans, tokenApiKey, tokenUrl, configured, termsVersion, caseId, tenantSlug, initialPlanId,
@@ -57,10 +52,7 @@ export default function SignupFlow({
   const [agreed, setAgreed] = useState(false);
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
-  const [lastNameKana, setLastNameKana] = useState("");
-  const [firstNameKana, setFirstNameKana] = useState("");
   const fullName = `${lastName.trim()} ${firstName.trim()}`.trim();
-  const fullNameKana = `${lastNameKana.trim()} ${firstNameKana.trim()}`.trim();
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [serviceStart, setServiceStart] = useState(defaultServiceStart());
@@ -88,7 +80,7 @@ export default function SignupFlow({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          planId, name: fullName, nameKana: fullNameKana, phone, email,
+          planId, name: fullName, phone, email,
           serviceStartDate: serviceStart,
           token: tok.token, tokenKey: tok.tokenKey,
           consentAccepted: agreed,
@@ -147,7 +139,6 @@ export default function SignupFlow({
 
   const infoValid =
     lastName.trim() !== "" && firstName.trim() !== "" &&
-    isKatakana(lastNameKana) && isKatakana(firstNameKana) &&
     phone.trim() !== "" && isEmail(email) && !!serviceStart && agreed;
   const canNext = cur === "plan" ? !!plan : cur === "info" ? infoValid : true;
   const isLast = idx === steps.length - 1;
@@ -201,7 +192,7 @@ export default function SignupFlow({
           </div>
         )}
 
-        {/* お客様情報: 氏名・フリガナ(カタカナ)・電話・メール・利用開始日・規約同意 */}
+        {/* お客様情報: 氏名・電話・メール・利用開始日・規約同意 */}
         {cur === "info" && (
           <div className="space-y-3">
             <div>
@@ -212,18 +203,6 @@ export default function SignupFlow({
                 <input className="input w-full" value={firstName} onChange={(e) => setFirstName(e.target.value)}
                   autoComplete="given-name" placeholder="名（太郎）" required />
               </div>
-            </div>
-            <div>
-              <div className="label">フリガナ（カタカナ）*</div>
-              <div className="grid grid-cols-2 gap-2">
-                <input className="input w-full" value={lastNameKana} onChange={(e) => setLastNameKana(e.target.value)}
-                  placeholder="セイ（ヤマダ）" required />
-                <input className="input w-full" value={firstNameKana} onChange={(e) => setFirstNameKana(e.target.value)}
-                  placeholder="メイ（タロウ）" required />
-              </div>
-              {((lastNameKana && !isKatakana(lastNameKana)) || (firstNameKana && !isKatakana(firstNameKana))) && (
-                <p className="text-[11px] text-bad mt-1">カタカナでご入力ください</p>
-              )}
             </div>
             <div>
               <div className="label">電話番号 *</div>

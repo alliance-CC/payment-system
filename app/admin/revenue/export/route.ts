@@ -20,11 +20,11 @@ export async function GET(req: Request) {
 
   const b = await loadRevenue({ month });
 
-  const header = ["会員ID", "お客様", "フリガナ", "プラン", "プラン月額", "利用状況", `当月課金(${month})`];
+  const header = ["会員ID", "お客様", "プラン", "プラン月額", "利用状況", `当月課金(${month})`];
   const lines = [header.map(cell).join(",")];
   for (const u of b.users) {
     lines.push([
-      u.accountId, u.name ?? "", u.nameKana ?? "", u.planName, u.planAmount,
+      u.accountId, u.name ?? "", u.planName, u.planAmount,
       u.usageLabel, u.monthState,
     ].map(cell).join(","));
   }
