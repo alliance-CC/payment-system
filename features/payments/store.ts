@@ -81,6 +81,30 @@ export async function getContractNameKanaMap(ids: string[]): Promise<Map<string,
   return map;
 }
 
+/**
+ * 案件をDBから完全削除する (テスト案件のクリーンアップ用)。
+ * payment_charges → payment_consents → payment_contracts の順で物理削除する。
+ * ⚠️ 取り消し不可。呼び出し側で本番ガード・確認を必ず行うこと。
+ */
+export async function hardDeleteContractByAccountId(
+  accountId: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const service = createSupabaseService();
+  const { data: c, error: e0 } = await service
+    .from("payment_contracts").select("id").eq("account_id", accountId).maybeSingle();
+  if (e0) return { ok: false, error: e0.message };
+  if (!c) return { ok: false, error: "not-found" };
+  const contractId = (c as any).id as string;
+
+  const delCharges = await service.from("payment_charges").delete().eq("contract_id", contractId);
+  if (delCharges.error) return { ok: false, error: delCharges.error.message };
+  const delConsents = await service.from("payment_consents").delete().eq("account_id", accountId);
+  if (delConsents.error) return { ok: false, error: delConsents.error.message };
+  const delContract = await service.from("payment_contracts").delete().eq("id", contractId);
+  if (delContract.error) return { ok: false, error: delContract.error.message };
+  return { ok: true };
+}
+
 export async function insertContract(row: {
   tenant_id: string;
   account_id: string;

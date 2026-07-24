@@ -3,7 +3,7 @@
 //   (プラン=LPから確定) → 1. お客様情報(氏名・フリガナ・電話・メール・利用開始日・規約同意)
 //                        → 2. カード入力 → 完了
 //   カード番号は tokenize.ts でブラウザ→VeriTrans 直送 (サーバー非通過 §2/§7)。
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CreditCard, Loader2, CheckCircle2, AlertCircle, Lock,
   ChevronRight, ChevronLeft, ExternalLink,
@@ -72,6 +72,34 @@ export default function SignupFlow({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ accountId: string; nextChargeDate: string } | null>(null);
 
+  // 利用規約を見て戻ってきたときにフォーム内容を復元する (カード情報は保存しない §7)。
+  const SS_KEY = "kurashi-signup";
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(SS_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (!planLocked && typeof s.planId === "string") setPlanId(s.planId);
+      if (typeof s.lastName === "string") setLastName(s.lastName);
+      if (typeof s.firstName === "string") setFirstName(s.firstName);
+      if (typeof s.lastNameKana === "string") setLastNameKana(s.lastNameKana);
+      if (typeof s.firstNameKana === "string") setFirstNameKana(s.firstNameKana);
+      if (typeof s.phone === "string") setPhone(s.phone);
+      if (typeof s.email === "string") setEmail(s.email);
+      if (typeof s.serviceStart === "string") setServiceStart(s.serviceStart);
+      if (typeof s.agreed === "boolean") setAgreed(s.agreed);
+    } catch { /* 破損時は無視 */ }
+    // 初回マウント時のみ
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(SS_KEY, JSON.stringify({
+        planId, lastName, firstName, lastNameKana, firstNameKana, phone, email, serviceStart, agreed,
+      }));
+    } catch { /* 容量超過等は無視 */ }
+  }, [planId, lastName, firstName, lastNameKana, firstNameKana, phone, email, serviceStart, agreed]);
+
   const plan = plans.find((p) => p.id === planId);
 
   async function submit(e: React.FormEvent) {
@@ -111,6 +139,7 @@ export default function SignupFlow({
         setError(json?.vtDetail ? `${msg}\n詳細: ${json.vtDetail}` : msg);
         return;
       }
+      try { sessionStorage.removeItem(SS_KEY); } catch { /* noop */ }
       setDone({ accountId: json.accountId, nextChargeDate: json.nextChargeDate });
     } catch (err: any) {
       setError(String(err?.message ?? err));
@@ -151,7 +180,8 @@ export default function SignupFlow({
     phone.trim() !== "" && isEmail(email) && !!serviceStart && agreed;
   const canNext = cur === "plan" ? !!plan : cur === "info" ? infoValid : true;
   const isLast = idx === steps.length - 1;
-  const termsHref = `/legal/terms/${planId}`;
+  // 規約は同じタブで開き、規約ページから「お申し込みに戻る」で復帰できるようにする (入力はsessionStorageで保持)
+  const termsHref = `/legal/terms/${planId}?from=subscribe`;
 
   return (
     <>
@@ -250,7 +280,7 @@ export default function SignupFlow({
               </a>
               <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
                 <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
-                <span>利用規約の内容を確認し、同意します（毎月の継続課金・解約はいつでも可能／規約バージョン: {termsVersion}）</span>
+                <span>利用規約の内容を確認し、同意します</span>
               </label>
             </div>
           </div>
@@ -294,7 +324,7 @@ export default function SignupFlow({
             </div>
             {plan && (
               <div className="text-xs text-muted bg-bg rounded-lg p-2.5">
-                お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()}（利用開始月＋翌月は無料）
+                お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()}（税込）。利用開始月＋翌月は無料、以降は毎月自動で継続課金されます（解約はいつでも可能）。
               </div>
             )}
           </div>
@@ -333,7 +363,7 @@ export default function SignupFlow({
 
       {/* 特定商取引法に基づく表記 (申込フォーム外・念のため) */}
       <p className="text-[11px] text-muted text-center mt-3">
-        <a href="/legal/tokusho" target="_blank" rel="noreferrer" className="text-accent underline">
+        <a href="https://lifeap.co.jp/tokutei/" target="_blank" rel="noopener noreferrer" className="text-accent underline">
           特定商取引法に基づく表記
         </a>
       </p>
