@@ -244,6 +244,24 @@ export default function SignupFlow({
             <div className="flex items-center gap-2 text-sm text-muted">
               <CreditCard size={15} className="text-navy" />お支払いはクレジットカードです
             </div>
+            {/* 国際ブランドのロゴ掲示 (カード会社 加盟店規約により支払画面での掲示が必須) */}
+            <div>
+              <div className="text-[11px] text-muted mb-1">ご利用いただけるカードブランド</div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { src: "/brand/visa.png", alt: "Visa" },
+                  { src: "/brand/mastercard.png", alt: "Mastercard" },
+                  { src: "/brand/jcb.gif", alt: "JCB" },
+                  { src: "/brand/amex.jpg", alt: "American Express" },
+                  { src: "/brand/diners.gif", alt: "Diners Club" },
+                ].map((b) => (
+                  <span key={b.alt} className="inline-flex items-center justify-center bg-white border border-border rounded px-1.5 h-8">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={b.src} alt={b.alt} className="h-5 w-auto" />
+                  </span>
+                ))}
+              </div>
+            </div>
             <div>
               <div className="label flex items-center gap-1"><CreditCard size={13} />カード番号</div>
               <input className="input w-full font-mono" inputMode="numeric" autoComplete="cc-number"
