@@ -159,11 +159,11 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   // 課金日:
   //   無料期間あり → 暦月課金 (anchor=1)・初回課金日 = 申込月+freeMonths の1日 (§規約 会費対象期間)
   //   無料期間なし → 従来どおり 翌月同日
-  const anchorDay = useFreePeriod ? 1 : parseInt(today.slice(8, 10), 10);
-  // 無料期間あり: 初回課金日 = 利用開始月 + freeMonths の1日
-  //   (利用開始月=1ヶ月目・翌月=2ヶ月目まで無料 → 翌々月=3ヶ月目の1日から課金)
+  const anchorDay = useFreePeriod ? policy.chargeDay : parseInt(today.slice(8, 10), 10);
+  // 無料期間あり: 初回課金日 = 利用開始月 + freeMonths の「課金日(chargeDay)」
+  //   (利用開始月=1ヶ月目・翌月=2ヶ月目まで無料 → 翌々月=3ヶ月目の課金日から課金)
   const nextChargeDate = useFreePeriod
-    ? firstChargeDate(serviceStart, freeMonths)
+    ? firstChargeDate(serviceStart, freeMonths, policy.chargeDay)
     : nextChargeDateAfter(monthOf(today), anchorDay);
   const contractStatus = indeterminate ? "suspended" : "active";
   const contractNextDate = indeterminate ? null : nextChargeDate;

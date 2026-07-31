@@ -8,6 +8,8 @@ import type { Plan } from "./plans";
 export type PaymentSettings = {
   plans: Plan[];                         // プラン(ID・名称・月額・周期)
   freeMonths: number;                    // 無料期間(申込月含むヶ月数)
+  chargeDay: number;                     // 毎月の課金日(1〜28)
+
   retryIntervalsDays: number[];          // 失敗リトライ間隔(日)
   retryMax: number;                      // リトライ上限
   cardExpiredCodes: string[];            // カード期限切れ判定コード(プレフィックス)

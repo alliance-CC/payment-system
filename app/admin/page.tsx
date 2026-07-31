@@ -4,10 +4,11 @@ import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { loadPlans } from "@/features/payments/plans";
 import { todayJst } from "@/features/payments/billing-config";
-import { cancelAction, deleteAction, changePlanAction, logoutAction } from "./actions";
+import { cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction } from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
 import ChangePlanButton from "./ChangePlanButton";
+import TestChargeButton from "./TestChargeButton";
 import CopyButton from "./CopyButton";
 
 export const dynamic = "force-dynamic";
@@ -40,9 +41,10 @@ function statusBadge(v: RegistrantRow["statusLabel"]) {
 export default async function AdminBoardPage({
   searchParams,
 }: {
-  searchParams: { month?: string; status?: string; q?: string; del?: string; plan?: string };
+  searchParams: { month?: string; status?: string; q?: string; del?: string; plan?: string; testcharge?: string; code?: string };
 }) {
   requireAdmin();
+  const isProd = String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true";
 
   const month = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : todayJst().slice(0, 7);
   const status = searchParams.status ?? "all";
@@ -63,6 +65,16 @@ export default async function AdminBoardPage({
     noplan: { text: "選択したプランが見つかりませんでした。", ok: false },
     notfound: { text: "対象の案件が見つかりませんでした。", ok: false },
     err: { text: "プラン変更に失敗しました。時間をおいて再度お試しください。", ok: false },
+  };
+  const testRes = searchParams.testcharge ?? "";
+  const testCode = searchParams.code ?? "";
+  const testMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: "動作テスト課金：成功。カードは正しく登録され、後から引き落とし可能です（本番の毎月課金も動作します）。", ok: true },
+    fail: { text: `動作テスト課金：失敗しました${testCode ? `（コード: ${testCode}）` : ""}。カード登録やVeriTrans設定をご確認ください。`, ok: false },
+    prod: { text: "本番環境では動作テスト課金は実行できません（実際に課金してしまうため）。検証環境でお試しください。", ok: false },
+    notfound: { text: "対象の案件が見つかりませんでした。", ok: false },
+    noconfig: { text: "VeriTransの設定（CCID/鍵）が未設定です。", ok: false },
+    err: { text: "動作テスト課金に失敗しました。", ok: false },
   };
   const [{ rows, counts }, plans] = await Promise.all([
     loadBoard({ month, status, q }),
@@ -108,6 +120,12 @@ export default async function AdminBoardPage({
         {planRes && planMsg[planRes] && (
           <div className={"card p-3 text-sm " + (planMsg[planRes].ok ? "text-good" : "text-bad")}>
             {planMsg[planRes].text}
+          </div>
+        )}
+        {/* 動作テスト課金の結果通知 */}
+        {testRes && testMsg[testRes] && (
+          <div className={"card p-3 text-sm " + (testMsg[testRes].ok ? "text-good" : "text-bad")}>
+            {testMsg[testRes].text}
           </div>
         )}
 
@@ -209,6 +227,13 @@ export default async function AdminBoardPage({
                           <input type="hidden" name="accountId" value={r.accountId} />
                           <input type="hidden" name="month" value={month} />
                           <CancelButton name={r.name} />
+                        </form>
+                      )}
+                      {!isProd && (
+                        <form action={testChargeAction}>
+                          <input type="hidden" name="accountId" value={r.accountId} />
+                          <input type="hidden" name="month" value={month} />
+                          <TestChargeButton />
                         </form>
                       )}
                       <form action={deleteAction}>

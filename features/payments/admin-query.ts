@@ -80,7 +80,7 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
     // 課金開始日: 利用開始日 + freeMonths の1日 (無料期間0なら利用開始日)
     const chargeBasis = chosen ?? applied;
     const chargeStart = chargeBasis
-      ? (policy.freeMonths > 0 ? firstChargeDate(chargeBasis, policy.freeMonths) : chargeBasis)
+      ? (policy.freeMonths > 0 ? firstChargeDate(chargeBasis, policy.freeMonths, policy.chargeDay) : chargeBasis)
       : "";
     const canceledAt = c.canceled_at ? jstDate(c.canceled_at) : null;
 

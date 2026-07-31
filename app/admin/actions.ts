@@ -5,6 +5,8 @@ import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE
 import { cancelSubscription } from "@/features/payments/billing";
 import { hardDeleteContractByAccountId, getContractByAccountId, updateContractRow } from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
+import { chargeByAccount } from "@/features/payments/veritrans/paynowid";
+import { loadVeritransConfig } from "@/features/payments/veritrans/config";
 import { savePaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
 export async function loginAction(formData: FormData): Promise<void> {
@@ -61,6 +63,39 @@ export async function changePlanAction(formData: FormData): Promise<void> {
   redirect(to("ok"));
 }
 
+// 動作テスト課金 (検証用)。登録済みカードに単発の都度決済を実行し、
+//   「会員登録+カード登録が“後から課金できる形”で成立しているか」を実機確認する。
+//   ・本番環境(VT_PRODUCTION=true)では実行不可(実際に課金してしまうため)。
+//   ・請求スケジュールとは別の一意orderIdを使い、payment_charges には記録しない。
+export async function testChargeAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const month = String(formData.get("month") ?? "");
+  const to = (s: string, extra = "") => `/admin?${month ? `month=${encodeURIComponent(month)}&` : ""}testcharge=${s}${extra}`;
+
+  if (String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true") redirect(to("prod"));
+  if (!accountId) redirect(to("err"));
+  const contract = await getContractByAccountId(accountId);
+  if (!contract) redirect(to("notfound"));
+  const cfg = await loadVeritransConfig(contract.tenant_id);
+  if (!cfg.merchantCcid || !cfg.merchantKey) redirect(to("noconfig"));
+
+  const orderId = `${accountId}_verify_${Date.now()}`;
+  let ok = false, code = "";
+  try {
+    const r = await chargeByAccount(
+      { accountId, orderId, amount: contract.amount, freeKey: contract.customer_id ?? undefined },
+      cfg,
+    );
+    ok = !!r.ok;
+    code = r.vResultCode ?? (r.transportError ? "TRANSPORT" : "");
+  } catch (e: any) {
+    ok = false;
+    code = String(e?.message ?? e).slice(0, 40);
+  }
+  redirect(to(ok ? "ok" : "fail", code ? `&code=${encodeURIComponent(code)}` : ""));
+}
+
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。
 //   二重の歯止め: ①確認入力(会員ID一致) ②本番環境では PAYMENTS_ALLOW_DELETE=true が必須。
 export async function deleteAction(formData: FormData): Promise<void> {
@@ -107,6 +142,7 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   const settings: PaymentSettings = {
     plans,
     freeMonths: Math.max(0, num("freeMonths", 2)),
+    chargeDay: Math.min(28, Math.max(1, num("chargeDay", 1))),
     retryIntervalsDays: list("retryIntervalsDays").map((s) => parseInt(s, 10)).filter((n) => Number.isFinite(n) && n > 0),
     retryMax: Math.max(0, num("retryMax", 3)),
     cardExpiredCodes: list("cardExpiredCodes"),
