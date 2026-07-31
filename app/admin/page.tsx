@@ -2,10 +2,12 @@ import Link from "next/link";
 import { LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
+import { loadPlans } from "@/features/payments/plans";
 import { todayJst } from "@/features/payments/billing-config";
-import { cancelAction, deleteAction, logoutAction } from "./actions";
+import { cancelAction, deleteAction, changePlanAction, logoutAction } from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
+import ChangePlanButton from "./ChangePlanButton";
 import CopyButton from "./CopyButton";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +40,7 @@ function statusBadge(v: RegistrantRow["statusLabel"]) {
 export default async function AdminBoardPage({
   searchParams,
 }: {
-  searchParams: { month?: string; status?: string; q?: string; del?: string };
+  searchParams: { month?: string; status?: string; q?: string; del?: string; plan?: string };
 }) {
   requireAdmin();
 
@@ -53,7 +55,19 @@ export default async function AdminBoardPage({
     mismatch: { text: "会員IDが一致しなかったため削除を中止しました。", ok: false },
     blocked: { text: "本番環境では削除がロックされています（環境変数 PAYMENTS_ALLOW_DELETE=true が必要）。", ok: false },
   };
-  const { rows, counts } = await loadBoard({ month, status, q });
+  const planRes = searchParams.plan ?? "";
+  const planMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: "プランを変更しました（無料期間中は初回課金から、課金開始後は翌月分から新料金）。", ok: true },
+    same: { text: "現在と同じプランのため変更しませんでした。", ok: false },
+    canceled: { text: "解約済みの案件はプラン変更できません。", ok: false },
+    noplan: { text: "選択したプランが見つかりませんでした。", ok: false },
+    notfound: { text: "対象の案件が見つかりませんでした。", ok: false },
+    err: { text: "プラン変更に失敗しました。時間をおいて再度お試しください。", ok: false },
+  };
+  const [{ rows, counts }, plans] = await Promise.all([
+    loadBoard({ month, status, q }),
+    loadPlans(),
+  ]);
   const exportQs = new URLSearchParams({ month, status, q }).toString();
 
   return (
@@ -88,6 +102,12 @@ export default async function AdminBoardPage({
         {del && delMsg[del] && (
           <div className={"card p-3 text-sm " + (delMsg[del].ok ? "text-good" : "text-bad")}>
             {delMsg[del].text}
+          </div>
+        )}
+        {/* プラン変更結果の通知 */}
+        {planRes && planMsg[planRes] && (
+          <div className={"card p-3 text-sm " + (planMsg[planRes].ok ? "text-good" : "text-bad")}>
+            {planMsg[planRes].text}
           </div>
         )}
 
@@ -158,7 +178,19 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
                     {r.accountId} <CopyButton value={r.accountId} />
                   </td>
-                  <td className="px-3 py-2">{r.planName}</td>
+                  <td className="px-3 py-2">
+                    <div>{r.planName}</div>
+                    {r.rawStatus !== "canceled" && (
+                      <form action={changePlanAction} className="flex items-center gap-1 mt-1">
+                        <input type="hidden" name="accountId" value={r.accountId} />
+                        <input type="hidden" name="month" value={month} />
+                        <select name="planId" defaultValue={r.planId} className="input text-xs py-0.5 px-1 w-auto">
+                          {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                        <ChangePlanButton currentPlanId={r.planId} />
+                      </form>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-muted">{r.serviceStart}</td>
                   <td className="px-3 py-2 text-muted">{r.chargeStart}</td>
                   <td className="px-3 py-2">{statusBadge(r.statusLabel)}</td>

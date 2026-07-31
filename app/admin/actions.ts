@@ -3,7 +3,8 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
 import { cancelSubscription } from "@/features/payments/billing";
-import { hardDeleteContractByAccountId } from "@/features/payments/store";
+import { hardDeleteContractByAccountId, getContractByAccountId, updateContractRow } from "@/features/payments/store";
+import { loadPlan } from "@/features/payments/plans";
 import { savePaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
 export async function loginAction(formData: FormData): Promise<void> {
@@ -32,6 +33,32 @@ export async function cancelAction(formData: FormData): Promise<void> {
   if (accountId) await cancelSubscription(accountId);
   const month = String(formData.get("month") ?? "");
   redirect(`/admin${month ? `?month=${encodeURIComponent(month)}` : ""}`);
+}
+
+// 顧客ごとのプラン変更。契約の plan_id/plan_name/amount を書き換えるだけ。
+//   継続課金は課金時に contracts.amount を参照するため、VeriTrans側の作り直しは不要。
+//   反映: 無料期間中=初回課金が新料金 / 課金開始後=翌月分から新料金 (当月・過去分は変えない)。
+export async function changePlanAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const planId = String(formData.get("planId") ?? "").trim();
+  const month = String(formData.get("month") ?? "");
+  const to = (s: string) => `/admin?${month ? `month=${encodeURIComponent(month)}&` : ""}plan=${s}`;
+
+  if (!accountId || !planId) redirect(to("err"));
+  const contract = await getContractByAccountId(accountId);
+  if (!contract) redirect(to("notfound"));
+  if (contract.status === "canceled") redirect(to("canceled"));
+  if (contract.plan_id === planId) redirect(to("same"));
+  const plan = await loadPlan(planId);
+  if (!plan) redirect(to("noplan"));
+
+  try {
+    await updateContractRow(contract.id, { plan_id: plan.id, plan_name: plan.name, amount: plan.amount });
+  } catch {
+    redirect(to("err"));
+  }
+  redirect(to("ok"));
 }
 
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。
