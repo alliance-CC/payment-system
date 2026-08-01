@@ -30,7 +30,7 @@ function isEmail(s: string): boolean {
 }
 
 export default function SignupFlow({
-  plans, tokenApiKey, tokenUrl, configured, termsVersion, caseId, tenantSlug, initialPlanId,
+  plans, tokenApiKey, tokenUrl, configured, termsVersion, caseId, tenantSlug, initialPlanId, use3ds,
 }: {
   plans: Plan[];
   tokenApiKey: string;
@@ -41,6 +41,8 @@ export default function SignupFlow({
   tenantSlug?: string;
   /** LP の申込ボタンから ?plan= で渡されたプラン。有効ならプラン選択を省略。 */
   initialPlanId?: string;
+  /** 3Dセキュア2.0 (VT_USE_3DS)。有効時はカード名義を収集し、申込後に認証画面へ遷移する */
+  use3ds?: boolean;
 }) {
   const planLocked = !!(initialPlanId && plans.some((p) => p.id === initialPlanId));
   // プラン確定時は「お客様情報 → お支払い」の2ステップ、未確定時は先頭に「プラン」。
@@ -60,6 +62,8 @@ export default function SignupFlow({
   const [expMonth, setExpMonth] = useState("");
   const [expYear, setExpYear] = useState("");
   const [cvc, setCvc] = useState("");
+  // カード名義 (半角ローマ字)。3DS ではブランドルール必須のため use3ds 時のみ収集
+  const [cardholder, setCardholder] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ accountId: string; nextChargeDate: string } | null>(null);
@@ -70,12 +74,15 @@ export default function SignupFlow({
     e.preventDefault();
     setError(null);
     setBusy(true);
+    let navigating = false;   // 3DS 認証画面へ遷移中は busy 表示を維持する
     try {
       // 1. カードトークン化 (ブラウザ → VeriTrans 直送 §2)
       const tok = await tokenizeCard(tokenUrl, tokenApiKey, { number, expMonth, expYear, cvc });
       if (!tok.ok) { setError(tok.error); return; }
 
       // 2. 申込 (サーバーが 会員登録+カード登録+CRM反映+通知 を実行 §1.1-5,6)
+      // 3DS 有効時はカード名義 (半角ローマ字・バックスラッシュ不可) も送る
+      const holder = cardholder.replace(/[^\x20-\x7e]/g, "").replace(/\\/g, "").trim();
       const res = await fetch("/api/payments/veritrans/subscribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,6 +93,7 @@ export default function SignupFlow({
           consentAccepted: agreed,
           caseId: caseId || null,
           tenantSlug: tenantSlug || null,
+          cardholderName: use3ds ? holder : null,
         }),
       });
       const json = await res.json().catch(() => null);
@@ -95,6 +103,10 @@ export default function SignupFlow({
           ? "この案件は既にお申し込み済みです"
           : json?.error === "charge-pending"
           ? "決済結果の確認に時間がかかっています。恐れ入りますが、再度お申し込みはせず、お電話にてお問い合わせください"
+          : json?.error === "3ds-in-progress"
+          ? "本人認証の結果を確認中です。15分ほど待ってから再度お試しください"
+          : json?.error === "cardholder-name-required"
+          ? "カード名義（ローマ字）をご入力ください"
           : json?.error === "too-many-requests"
           ? "アクセスが集中しています。しばらく待ってから再度お試しください"
           : json?.error === "email-required"
@@ -103,11 +115,29 @@ export default function SignupFlow({
         setError(json?.vtDetail ? `${msg}\n詳細: ${json.vtDetail}` : msg);
         return;
       }
+      // 3DS: カード会社の本人認証画面へ遷移 (完了後 /subscribe/complete に戻る)
+      if (json.mode === "3ds") {
+        if (json.redirect) {
+          navigating = true;
+          window.location.href = json.redirect;   // 認証開始URL (ガイド 4.3.1)
+          return;                                  // busy のまま遷移を待つ
+        }
+        if (json.contents) {
+          // resResponseContents: 加工せずそのまま描画すると自動遷移する (編集厳禁)
+          navigating = true;
+          document.open();
+          document.write(json.contents);
+          document.close();
+          return;
+        }
+        setError("認証画面への遷移に失敗しました。時間をおいて再度お試しください");
+        return;
+      }
       setDone({ accountId: json.accountId, nextChargeDate: json.nextChargeDate });
     } catch (err: any) {
       setError(String(err?.message ?? err));
     } finally {
-      setBusy(false);
+      if (!navigating) setBusy(false);
     }
   }
 
@@ -292,10 +322,25 @@ export default function SignupFlow({
                   maxLength={4} value={cvc} onChange={(e) => setCvc(e.target.value)} required />
               </div>
             </div>
+            {use3ds && (
+              <div>
+                <div className="label">カード名義（ローマ字） *</div>
+                <input className="input w-full font-mono uppercase" autoComplete="cc-name"
+                  placeholder="TARO YAMADA" value={cardholder} maxLength={45}
+                  pattern="[ -~]{2,45}" title="カード券面のとおり半角ローマ字でご入力ください"
+                  onChange={(e) => setCardholder(e.target.value)} required />
+                <p className="text-[10px] text-muted mt-1">カード券面に記載のとおりにご入力ください（本人認証に使用します）</p>
+              </div>
+            )}
             {plan && (
               <div className="text-xs text-muted bg-bg rounded-lg p-2.5">
                 お申し込み内容: <b className="text-ink">{plan.name}</b> — 月額 ¥{plan.amount.toLocaleString()}（税込）。利用開始月＋翌月は無料、以降は毎月自動で継続課金されます（解約はいつでも可能）。
               </div>
+            )}
+            {use3ds && (
+              <p className="text-[11px] text-muted">
+                「申し込む」の後、カード会社の本人認証（3Dセキュア）画面へ移動する場合があります。認証完了後にこのサイトへ自動的に戻ります。
+              </p>
             )}
           </div>
         )}

@@ -46,6 +46,7 @@ export default async function SubscribePage({
           caseId={searchParams.case}
           tenantSlug={searchParams.tenant}
           initialPlanId={searchParams.plan}
+          use3ds={policy.use3ds}
         />
       </div>
     </main>

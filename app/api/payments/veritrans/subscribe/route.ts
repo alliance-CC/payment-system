@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { registerSubscription } from "@/features/payments/billing";
+import { registerSubscription, start3dsSubscription } from "@/features/payments/billing";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { createSupabaseService } from "@/shared/db/service";
 import { rateLimit, clientIpOf } from "@/shared/utils/rateLimit";
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
       { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   }
   const body = await req.json().catch(() => ({}));
-  const { planId, name, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate } = body ?? {};
+  const { planId, name, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate, cardholderName } = body ?? {};
 
   if (!consentAccepted) {
     return NextResponse.json({ error: "consent-required" }, { status: 400 });
@@ -48,13 +48,13 @@ export async function POST(req: Request) {
   const policy = await loadBillingPolicy();
   const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
 
-  const result = await registerSubscription({
+  const subscribeInput = {
     tenantId,
     planId: String(planId ?? ""),
     name: nameStr.slice(0, 100),
     phone: phoneStr.slice(0, 30),
     email: emailStr.slice(0, 200),
-    paymentMethod: "card",
+    paymentMethod: "card" as const,
     token,
     tokenKey: tokenKey ? String(tokenKey) : null,
     caseId: caseId ? String(caseId).slice(0, 100) : null,
@@ -64,7 +64,35 @@ export async function POST(req: Request) {
       ip,
       userAgent: req.headers.get("user-agent"),
     },
-  });
+  };
+
+  // 3DS (§6-4): 有効時は同期完結せず、ACS 認証画面への遷移情報を返す。
+  // 契約の有効化は認証完了後 (mpi-result / mpi-return → finalizeMpiOrder)。
+  if (policy.use3ds) {
+    // カード名義 (半角ローマ字) はブランドルール必須 (3DS ガイド 4.2.2)
+    const holder = String(cardholderName ?? "").trim();
+    if (holder.length < 2) {
+      return NextResponse.json({ error: "cardholder-name-required" }, { status: 400 });
+    }
+    const started = await start3dsSubscription({
+      ...subscribeInput,
+      cardholderName: holder.slice(0, 45),
+    });
+    if (!started.ok) {
+      const status = started.error === "charge-failed" ? 402
+        : started.error === "veritrans-not-configured" || started.error === "app-url-not-configured" ? 503
+        : 400;
+      return NextResponse.json(started, { status });
+    }
+    return NextResponse.json({
+      ok: true, mode: "3ds",
+      accountId: started.accountId, orderId: started.orderId,
+      redirect: started.redirect ?? null,
+      contents: started.contents ?? null,
+    });
+  }
+
+  const result = await registerSubscription(subscribeInput);
 
   if (!result.ok) {
     const status = result.error === "charge-failed" ? 402

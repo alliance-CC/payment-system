@@ -30,6 +30,10 @@ export const PAYNOWID_PATHS = {
   accountDelete: "/Delete/account",
   /** 会員情報の取得 SPEC_CHECK: コマンド名 (Get/Search 等) 未確認 */
   accountGet: "/Get/account",
+  /** 本人認証結果確認 (3DS ガイド 4.4.2 MpiGetResult)。
+   *  SPEC_CHECK: REST パスは MDK コマンド名 {サービス}{コマンド} → /{コマンド}/{サービス} の
+   *  命名則 (MpiAuthorize→/Authorize/mpi 公式確認済み) からの導出。検証環境で実機確認する */
+  mpiGetResult: "/GetResult/mpi",
 } as const;
 
 function baseParams(c: VeritransConfig): Record<string, any> {
@@ -157,32 +161,49 @@ export async function deleteAccount(accountId: string, cfg?: VeritransConfig): P
 }
 
 // --- 3Dセキュア 2.0 (§6-4) ------------------------------------------------------
-// /Authorize/mpi → レスポンスの authStartUrl / resResponseContents(HTML) で
-// チャレンジ画面へ遷移 → 結果は pushUrl へ通知 (§4)。
-// ⚠️ 2025年4月以降 3DS2.0 必須 (§2)。本番接続前に必ずこのフローを有効化・検証する。
-//    ここでは開始呼び出しのみ実装。SPEC_CHECK: 3DS2.0 の必須フィールド
-//    (serviceOptionType / accountInfo / browserInfo 等) は 3DS 開発ガイドとの照合必須。
+// /Authorize/mpi → レスポンスの authStartUrl (302リダイレクト) か resResponseContents
+// (そのままブラウザへ返すHTML) で ACS 認証画面へ遷移 → 結果は redirectionUri (ブラウザ復帰)
+// と pushUrl (結果通知PUSH) の両方で受信する (非同期・順不同。ガイド 3-2 / 4-4)。
+//
+// 2026-08 3DS2.0 開発ガイド (ex_3DS2 v1.0.21) 照合済み — MpiAuthorizeRequestDto:
+//   必須○ : serviceOptionType / orderId / amount / redirectionUri / deviceChannel("02")
+//   必須○ : token またはカード情報 (当アプリはトークンのみ §2)
+//   ブランドルール必須 (2024-08〜。未設定でもVTはエラーにしないが必ず送ること・注1〜3):
+//     cardholderName / (cardholderEmail または電話番号) / customerIp
+//   任意△ : withCapture(既定"false"=与信のみ) / pushUrl / verifyResultLink /
+//            verifyTimeout / httpUserAgent (未指定はVT側で画面から取得)
+//   ※ deviceChannel 未設定だと authStartUrl が返らない (3DS2.0 リクエストにならない)。
 export type MpiAuthorizeInput = {
   orderId: string;
   amount: number;
   token: string;
   tokenKey?: string;
-  accountId?: string;                // 会員登録も同時に行う場合
+  accountId?: string;                // 会員登録も同時に行う場合 (ワンクリック継続課金併用)
   /** 3DS 結果の受信先 (自社 pushUrl)。安定して即応答すること (§8)。https 必須 */
   pushUrl: string;
-  /** チャレンジ完了後に購入者を戻すURL (公式確認済みフィールド)。https 必須 */
+  /** チャレンジ完了後に購入者を戻すURL。https 必須 (mpi-none 時は SSL 必須と明記) */
   redirectionUri: string;
-  /** MPI サービスの動作区分 (公式確認済み: "mpi-complete"/"mpi-company"/"mpi-merchant"/"mpi-none")。
-   *  SPEC_CHECK: 既定値と決済確定までの分担は 3DS 開発ガイドで確認 */
+  /** MPI サービスの動作区分。既定は補足資料§1 の推奨に基づき通常認証 mpi-company
+   *  (Y/A で与信・カード会社リスク負担)。アクワイアラ要請があれば mpi-complete に切替 */
   serviceOptionType?: string;
+  /** カード保有者名 (ブランドルール必須・半角2〜45桁)。トークン取得時に設定済みなら省略可 */
+  cardholderName?: string;
+  /** カード保有者メール (RFC5322)。email か電話のどちらかが必須 (注2) */
+  cardholderEmail?: string;
+  /** 消費者IPアドレス (ブランドルール必須・注3)。MAP の自動収集ON時は省略可 */
+  customerIp?: string;
+  /** true=与信+売上 / false=与信のみ。省略時は VT 既定の "false" (与信のみ) */
+  withCapture?: boolean;
+  /** 本人認証タイムアウト (分・1〜999)。ECサイトのセッションより数分短く (ガイド推奨) */
+  verifyTimeoutMin?: number;
   httpAccept?: string;
   httpUserAgent?: string;
 };
 
 export type MpiStartResult = VtResult & {
-  /** チャレンジ画面へ遷移させる URL (レスポンス由来 §4) */
+  /** ACS 認証画面へ 302 遷移させる URL (認可応答から3分有効・ガイド 4.3.1) */
   authStartUrl?: string;
-  /** もしくはそのまま返す HTML (レスポンス由来 §4) */
+  /** もしくは加工せずそのままブラウザへ返す HTML (編集厳禁・ガイド 4.3.1) */
   resResponseContents?: string;
 };
 
@@ -194,14 +215,26 @@ export async function authorizeMpi(input: MpiAuthorizeInput, cfg?: VeritransConf
     ...baseParams(c),
     orderId: input.orderId,
     amount: String(input.amount),
-    // フィールド名 (serviceOptionType/pushUrl/redirectionUri/httpAccept/httpUserAgent) は
-    // 公式ドキュメントで存在確認済み。SPEC_CHECK: 必須集合と accountInfo 等の
-    // 追加フィールドは 3DS2.0 開発ガイド別冊 (ex_3DS2) で照合すること。
-    serviceOptionType: input.serviceOptionType ?? process.env.VT_3DS_SERVICE_OPTION ?? "mpi-complete",
-    pushUrl: input.pushUrl,
+    serviceOptionType: input.serviceOptionType ?? process.env.VT_3DS_SERVICE_OPTION ?? "mpi-company",
     redirectionUri: input.redirectionUri,
+    pushUrl: input.pushUrl,
+    // ブラウザ復帰時にも mpiMstatus/vResultCode/vAuthInfo 等の詳細を受け取る (4.4.1 の "1"=POST連携)
+    verifyResultLink: "1",
+    // 3DS2.0 の必須値。"02"=ブラウザベース。未設定だと authStartUrl が返らない (ガイド明記)
+    deviceChannel: "02",
+    jpo: "10",                       // 一括 (未指定でも"10"適用だが registerAndCharge と揃えて明示)
     payNowIdParam,
   };
+  if (input.withCapture !== undefined) params.withCapture = String(input.withCapture);
+  if (input.verifyTimeoutMin) params.verifyTimeout = String(input.verifyTimeoutMin);
+  // ブランドルール必須項目 (注1〜3)。VT はエラーにしないが認証判定に使われるため必ず設定する。
+  // 値はスペースのみ等の不備を避けるため trim して空なら送らない (ガイド 4.2.2)。
+  const holder = input.cardholderName?.trim();
+  if (holder) params.cardholderName = holder.slice(0, 45);
+  const email = input.cardholderEmail?.trim();
+  if (email) params.cardholderEmail = email.slice(0, 254);
+  const ip = input.customerIp?.trim();
+  if (ip) params.customerIp = ip.slice(0, 45);
   if (input.httpAccept) params.httpAccept = input.httpAccept;
   if (input.httpUserAgent) params.httpUserAgent = input.httpUserAgent;
 
@@ -211,5 +244,37 @@ export async function authorizeMpi(input: MpiAuthorizeInput, cfg?: VeritransConf
     ...res,
     authStartUrl: r.authStartUrl ?? undefined,
     resResponseContents: r.resResponseContents ?? undefined,
+  };
+}
+
+// --- 3DS 結果確認 (ガイド 4.4.2 MpiGetResult) -----------------------------------
+// orderId 指定で本人認証とカード決済の結果を取得する。authHash 署名付きの
+// サーバー間通信のため応答は信頼できる — 結果通知(PUSH)には改ざんチェック値が無く
+// (ガイド 4-5: orderIdNNNN 連番形式・vAuthInfo なし)、ブラウザ復帰も偽装可能なので、
+// 契約の有効化はどの経路で気づいた場合も必ずこの照会結果で確定させる。
+export type MpiResultDetail = VtResult & {
+  /** 本要求(照会コマンド)自体ではなく「本人認証」の結果 (success/failure) */
+  mpiMstatus?: string;
+  /** 本人認証の詳細結果コード (G011…=成功 / GExx=失敗。補足資料 4-3) */
+  mpiVresultCode?: string;
+  /** カード決済の結果 (success/failure/pending。mpi 失敗時と mpi-none では空) */
+  cardMstatus?: string;
+  /** "AuthorizeConfirm"=フリクションレス / "VerifyNotify"=チャレンジ */
+  txnType?: string;
+};
+
+export async function getMpiResult(orderId: string, cfg?: VeritransConfig): Promise<MpiResultDetail> {
+  const c = cfg ?? (await loadVeritransConfig());
+  const params: Record<string, any> = { ...baseParams(c), orderId };
+  const res = await vtCall(PAYNOWID_PATHS.mpiGetResult, params, c);
+  const r = res.raw?.result ?? {};
+  // 注意 (4.4.2): 応答トップの mstatus/vResultCode は「照会コマンド自体」の成否
+  // (成功=G021…)。決済の成否は mpiMstatus / cardMstatus 側で判定すること。
+  return {
+    ...res,
+    mpiMstatus: r.mpiMstatus ?? undefined,
+    mpiVresultCode: r.mpiVresultCode ?? undefined,
+    cardMstatus: r.cardMstatus ?? undefined,
+    txnType: r.txnType ?? undefined,
   };
 }
