@@ -26,7 +26,7 @@ export async function POST(req: Request) {
         amount: 100,
         token,
         pushUrl: `${origin}/api/payments/veritrans/mpi-result`,
-        redirectionUri: `${origin}/subscribe`,
+        redirectionUri: `${origin}/subscribe/3ds-return`,
       },
       cfg,
     );
@@ -34,8 +34,9 @@ export async function POST(req: Request) {
       ok: r.ok,
       mstatus: r.mstatus,
       vResultCode: r.vResultCode,
-      hasAuthStartUrl: !!r.authStartUrl,
-      hasChallengeHtml: !!r.resResponseContents,
+      authStartUrl: r.authStartUrl ?? null,
+      // 本人認証画面のHTML。ブラウザ側でこれを表示して認証を実行する。
+      challengeHtml: r.resResponseContents ?? null,
       transportError: r.transportError ?? null,
       raw: r.raw,
     });

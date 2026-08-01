@@ -31,6 +31,15 @@ export default function ThreeDSTest({
         body: JSON.stringify({ token: tok.token }),
       });
       const json = await res.json().catch(() => ({ error: "レスポンスの解析に失敗しました" }));
+      if (json?.challengeHtml) {
+        // 本人認証画面を起動する。このページを認証画面に差し替え、認証後は
+        // /subscribe/3ds-return に戻って結果が表示される (そこをコピーして共有)。
+        document.open();
+        document.write(json.challengeHtml as string);
+        document.close();
+        return;
+      }
+      // 認証不要(フリクションレス)やエラーはそのまま表示
       setResult(JSON.stringify(json, null, 2));
     } catch (err: any) {
       setError(String(err?.message ?? err));

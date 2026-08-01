@@ -16,7 +16,8 @@ export default async function ThreeDSTestPage() {
         <header>
           <h1 className="text-xl font-bold text-navy">3Dセキュア 疎通テスト（検証用）</h1>
           <p className="text-xs text-muted mt-1">
-            テストカードで実行し、表示された「VeriTransの応答」をそのまま開発者に共有してください。
+            テストカードで「実行」を押すと<b>本人認証の画面に進みます</b>。認証を完了すると
+            <b>結果ページ（3ds-return）</b>に戻るので、そこに表示された内容をそのまま開発者に共有してください。
             課金や契約作成は行いません。検証環境のみ動作します。
           </p>
         </header>
