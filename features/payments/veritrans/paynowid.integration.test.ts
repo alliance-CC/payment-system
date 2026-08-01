@@ -11,7 +11,7 @@ import { createServer, type Server, type IncomingMessage } from "http";
 import { createHash } from "crypto";
 import type { VeritransConfig } from "./config";
 import {
-  registerAndCharge, chargeByAccount, updateCardByToken, deleteAccount, authorizeMpi,
+  registerAndCharge, chargeByAccount, updateCardByToken, deleteAccount, authorizeMpi, getMpiResult,
 } from "./paynowid";
 
 type Captured = { path: string; params: any; authHash: string; rawBody: string };
@@ -221,5 +221,81 @@ describe("authorizeMpi (3DS2.0 開始)", () => {
     expect(c.params.redirectionUri).toContain("complete");
     expect(c.params.payNowIdParam.token).toBe("tok-3ds");
     expect(c.params.payNowIdParam.accountParam.accountId).toBe("MR0001");
+  });
+
+  it("3DS2.0 必須項目: deviceChannel=02 / verifyResultLink=1 を必ず送る (ガイド 4.3.1)", async () => {
+    nextResponse = { result: { mstatus: "success", vResultCode: "A001000000000000", authStartUrl: "https://3ds.example/s" } };
+    await authorizeMpi({
+      orderId: "MR0002_202611", amount: 1000, token: "tok",
+      pushUrl: "https://app.example/push", redirectionUri: "https://app.example/ret",
+    }, cfg());
+    const c = last();
+    // deviceChannel 未設定だと authStartUrl が返らない (3DS2.0 リクエストにならない) ため必須
+    expect(c.params.deviceChannel).toBe("02");
+    // ブラウザ復帰でも詳細パラメータ (mpiMstatus/vAuthInfo 等) を受け取る
+    expect(c.params.verifyResultLink).toBe("1");
+    // serviceOptionType 既定は補足資料§1 推奨の通常認証 (Y/A で与信・カード会社リスク)
+    expect(c.params.serviceOptionType).toBe("mpi-company");
+  });
+
+  it("ブランドルール必須項目 (注1〜3): cardholderName / cardholderEmail / customerIp を写像する", async () => {
+    nextResponse = { result: { mstatus: "success", vResultCode: "A001000000000000" } };
+    await authorizeMpi({
+      orderId: "MR0003_202611", amount: 0, token: "tok",
+      pushUrl: "https://app.example/push", redirectionUri: "https://app.example/ret",
+      cardholderName: "TARO YAMADA", cardholderEmail: "taro@example.com", customerIp: "203.0.113.7",
+      withCapture: false, httpUserAgent: "UA/1.0",
+    }, cfg());
+    const c = last();
+    expect(c.params.cardholderName).toBe("TARO YAMADA");
+    expect(c.params.cardholderEmail).toBe("taro@example.com");
+    expect(c.params.customerIp).toBe("203.0.113.7");
+    expect(c.params.withCapture).toBe("false");
+    expect(c.params.httpUserAgent).toBe("UA/1.0");
+    // 有効性確認 (amount=0) — 0円売上は不可のため withCapture=true と併用しないこと
+    expect(c.params.amount).toBe("0");
+  });
+
+  it("空白のみの cardholderName は送らない (スペースのみは書式エラー・ガイド 4.2.2)", async () => {
+    nextResponse = { result: { mstatus: "success", vResultCode: "A001000000000000" } };
+    await authorizeMpi({
+      orderId: "MR0004_202611", amount: 1000, token: "tok",
+      pushUrl: "https://p.example", redirectionUri: "https://r.example",
+      cardholderName: "   ",
+    }, cfg());
+    expect(last().params.cardholderName).toBeUndefined();
+  });
+});
+
+describe("getMpiResult (3DS 結果確認 4.4.2)", () => {
+  it("orderId を送り mpiMstatus / cardMstatus を写像する (照会成功=G021)", async () => {
+    nextResponse = {
+      result: {
+        mstatus: "success", vResultCode: "G021000000000000",
+        mpiMstatus: "success", mpiVresultCode: "G011A00100000000",
+        cardMstatus: "success", txnType: "VerifyNotify",
+      },
+    };
+    const res = await getMpiResult("MR0001_202611", cfg());
+    const c = last();
+    expect(c.path).toBe("/payment/GetResult/mpi");
+    verifyHash(c);
+    expect(c.params.orderId).toBe("MR0001_202611");
+    expect(res.mpiMstatus).toBe("success");
+    expect(res.mpiVresultCode).toBe("G011A00100000000");
+    expect(res.cardMstatus).toBe("success");
+    expect(res.txnType).toBe("VerifyNotify");
+  });
+
+  it("本人認証失敗 (mpiMstatus=failure) では cardMstatus は空", async () => {
+    nextResponse = {
+      result: {
+        mstatus: "success", vResultCode: "G021000000000000",
+        mpiMstatus: "failure", mpiVresultCode: "GE23000000000000",
+      },
+    };
+    const res = await getMpiResult("MR0001_202611", cfg());
+    expect(res.mpiMstatus).toBe("failure");
+    expect(res.cardMstatus).toBeUndefined();
   });
 });

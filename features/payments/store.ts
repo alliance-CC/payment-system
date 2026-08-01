@@ -259,6 +259,45 @@ export async function getContractById(id: string): Promise<ContractRow | null> {
   return (data as ContractRow | null) ?? null;
 }
 
+/** orderId から課金試行を取得する (3DS 結果確定などの orderId 起点処理用)。
+ *  order_id は UNIQUE のため高々1行。 */
+export async function getChargeByOrderId(orderId: string): Promise<
+  | { id: string; tenant_id: string; contract_id: string; order_id: string;
+      charge_month: string; kind: string; amount: number; ok: boolean | null; v_result_code: string | null }
+  | null
+> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id, tenant_id, contract_id, order_id, charge_month, kind, amount, ok, v_result_code")
+    .eq("order_id", orderId)
+    .maybeSingle();
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  return (data as any) ?? null;
+}
+
+/**
+ * 未確定 (ok IS NULL) の課金試行を条件付きで確定する。
+ * 3DS の結果は「結果通知(PUSH)」と「ブラウザ復帰」の両経路から非同期・順不同・複数回
+ * 届くため (ガイド 3-2)、ok IS NULL を条件に UPDATE し、更新できた呼び出しだけが
+ * 成功後処理 (契約有効化・通知メール等) を実行する — DB を排他点にした冪等化。
+ * @returns true=この呼び出しが確定させた / false=他経路が確定済み (何もしない)
+ */
+export async function claimChargeFinalization(
+  id: string,
+  result: { ok: boolean; mstatus: string | null; v_result_code: string | null },
+): Promise<boolean> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .update(result)
+    .eq("id", id)
+    .is("ok", null)
+    .select("id");
+  if (error) throw new Error(`payment_charges claim failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
 /** 在疑義 (ok=null) の課金試行1件を取得する (手動確定用) */
 export async function getInDoubtCharge(chargeId: string): Promise<
   | { id: string; tenant_id: string; contract_id: string; order_id: string; charge_month: string; amount: number }
