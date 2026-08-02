@@ -104,8 +104,22 @@ export default function TermsView({ terms, fromSubscribe }: { terms: PlanTerms; 
         ))}
       </div>
 
-      {/* 事業者情報 */}
+      {/* 関連規約: ネットライフサポート（両プランに含まれる） */}
       <div className="card p-4 mt-8 text-[13px] text-ink">
+        <div className="font-semibold text-navy mb-1">あわせてご確認ください</div>
+        <p className="text-muted mb-2">
+          本プランには「ネットライフサポート」（ネット詐欺相談サービス＋ネット詐欺保険）が含まれます。別途、以下の規約が適用されます。
+        </p>
+        <Link
+          href={`/legal/terms/netlife${fromSubscribe ? "?from=subscribe" : ""}`}
+          className="text-accent font-medium hover:underline"
+        >
+          ネットライフサポート 利用規約を確認する →
+        </Link>
+      </div>
+
+      {/* 事業者情報 */}
+      <div className="card p-4 mt-6 text-[13px] text-ink">
         <div className="font-semibold text-navy mb-1.5">事業者情報</div>
         <dl className="space-y-0.5">
           <div className="flex gap-2"><dt className="text-muted w-20 shrink-0">事業者名</dt><dd>株式会社ライフアップ</dd></div>

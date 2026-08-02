@@ -28,6 +28,7 @@ function billingBadge(v: RegistrantRow["monthBilling"]) {
     "決済不備": "chip-bad",
     "確認中": "chip-gold",
     "未課金": "chip-bad",
+    "課金予定": "chip-navy",
     "対象外": "chip",
   };
   return <span className={`chip ${map[v] ?? "chip"}`}>{v}</span>;

@@ -19,7 +19,7 @@ export type RegistrantRow = {
   phone: string | null;
   email: string | null;
   consented: boolean;       // 利用規約 同意済み
-  monthBilling: "正常" | "決済不備" | "確認中" | "未課金" | "対象外";
+  monthBilling: "正常" | "決済不備" | "確認中" | "未課金" | "課金予定" | "対象外";
   billingAlert: boolean;    // 決済不備・確認中・延滞・期限切れ等の要注意
 };
 
@@ -98,9 +98,14 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
     else if (chs.some((x) => x.ok === null)) monthBilling = "確認中";
     else {
       const chargeMonth = chargeStart.slice(0, 7);
+      // 当月の課金予定日: 初回課金月は chargeStart、以降は当月の課金日(anchor=chargeDay)
+      const dueDate = month === chargeMonth
+        ? chargeStart
+        : `${month}-${String(policy.chargeDay).padStart(2, "0")}`;
       if (!chargeStart || month < chargeMonth) monthBilling = "対象外";       // 無料期間/利用開始前
       else if (c.status === "canceled" && canceledAt && canceledAt.slice(0, 7) < month) monthBilling = "対象外";
-      else monthBilling = "未課金";
+      else if (today < dueDate) monthBilling = "課金予定";                     // 課金日がまだ来ていない(将来月/当月未到来)=要注意ではない
+      else monthBilling = "未課金";                                           // 課金日を過ぎたのに課金記録が無い=要確認
     }
 
     const billingAlert =

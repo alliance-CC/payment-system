@@ -462,9 +462,9 @@ export async function start3dsSubscription(
   const useFreePeriod = freeMonths > 0;
   const today = todayJst();
   const serviceStart = normalizeDate(input.serviceStartDate) ?? firstChargeDate(today, 1);
-  const anchorDay = useFreePeriod ? 1 : parseInt(today.slice(8, 10), 10);
+  const anchorDay = useFreePeriod ? policy.chargeDay : parseInt(today.slice(8, 10), 10);
   const nextChargeDate = useFreePeriod
-    ? firstChargeDate(serviceStart, freeMonths)
+    ? firstChargeDate(serviceStart, freeMonths, policy.chargeDay)
     : nextChargeDateAfter(monthOf(today), anchorDay);
 
   // 契約を「suspended (自動課金対象外)」で先に作る:
