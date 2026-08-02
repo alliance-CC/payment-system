@@ -5,7 +5,10 @@
 //   replaceCard          : カード更新 (新トークンで差し替え → 延滞なら即再課金対象に)
 import "server-only";
 import { loadVeritransConfig, type VeritransConfig } from "./veritrans/config";
-import { registerAndCharge, chargeByAccount, updateCardByToken, deleteAccount } from "./veritrans/paynowid";
+import {
+  registerAndCharge, chargeByAccount, updateCardByToken, deleteAccount,
+  authorizeMpi, getMpiResult,
+} from "./veritrans/paynowid";
 import { loadPlan } from "./plans";
 import { newAccountId, accountIdFromCaseId, isValidAccountId } from "./account";
 import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
@@ -14,7 +17,8 @@ import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
-  insertConsent, updateServiceStartDate, type ContractRow,
+  insertConsent, updateServiceStartDate, getServiceStartMap,
+  getChargeByOrderId, claimChargeFinalization, type ContractRow,
 } from "./store";
 import {
   loadBillingPolicy, DEFAULT_TENANT_ID,
@@ -159,11 +163,11 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   // 課金日:
   //   無料期間あり → 暦月課金 (anchor=1)・初回課金日 = 申込月+freeMonths の1日 (§規約 会費対象期間)
   //   無料期間なし → 従来どおり 翌月同日
-  const anchorDay = useFreePeriod ? 1 : parseInt(today.slice(8, 10), 10);
-  // 無料期間あり: 初回課金日 = 利用開始月 + freeMonths の1日
-  //   (利用開始月=1ヶ月目・翌月=2ヶ月目まで無料 → 翌々月=3ヶ月目の1日から課金)
+  const anchorDay = useFreePeriod ? policy.chargeDay : parseInt(today.slice(8, 10), 10);
+  // 無料期間あり: 初回課金日 = 利用開始月 + freeMonths の「課金日(chargeDay)」
+  //   (利用開始月=1ヶ月目・翌月=2ヶ月目まで無料 → 翌々月=3ヶ月目の課金日から課金)
   const nextChargeDate = useFreePeriod
-    ? firstChargeDate(serviceStart, freeMonths)
+    ? firstChargeDate(serviceStart, freeMonths, policy.chargeDay)
     : nextChargeDateAfter(monthOf(today), anchorDay);
   const contractStatus = indeterminate ? "suspended" : "active";
   const contractNextDate = indeterminate ? null : nextChargeDate;
@@ -337,6 +341,434 @@ async function notifyRegistration(
     // TODO(§5): 送信失敗時のリトライ/記録。当面はサーバーログのみ
     console.error("[payments] registration notify failed:", (res as any).error);
   }
+}
+
+// ---- 3Dセキュア2.0 申込フロー (§6-4 / 3DS開発ガイド ex_3DS2) ------------------
+//
+// 非3DS (registerSubscription) と違い同期完結しない:
+//   start3dsSubscription: 同意→CRM→契約(suspended)+課金行(ok=null)→ /Authorize/mpi
+//     → authStartUrl をブラウザへ返し ACS 認証画面へ遷移させる
+//   finalizeMpiOrder: 結果通知(PUSH)・ブラウザ復帰のどちらから呼ばれても、
+//     MpiGetResult (署名付きサーバー間照会) で結果を取り直して確定する。
+//     PUSH 電文には改ざんチェック値が無く、ブラウザ復帰は偽装可能なため、
+//     受信値そのもので契約を有効化してはならない。
+//   冪等化: claimChargeFinalization (ok IS NULL 条件付き UPDATE) を排他点とし、
+//     勝った経路だけが契約有効化・通知メール等の成功後処理を実行する。
+//
+// VT_USE_3DS=false (既定) の間はこの経路は使われない。
+
+/** 3DS 認証タイムアウト (分)。ECサイトのセッションより数分短く (ガイド推奨)。
+ *  verifyTimeout 超過後の認証完了は VT 側でエラー扱いになり与信されない。 */
+const MPI_VERIFY_TIMEOUT_MIN = 15;
+
+/** 認証開始マーカー (charge.v_result_code に確定まで一時記録)。
+ *  補足資料§5: verifyTimeout 経過後の取引は「これ以上確認しても成立しない」ため
+ *  照会対象から外せとある = VT 側からは最終失敗が届かない。離脱で放置された取引を
+ *  アプリ側で失敗確定して再申込を解放するために開始時刻を持つ。 */
+const MPI_WAIT_MARKER = "3DS-WAIT:";
+/** マーカー経過でみなし失敗にするまでの時間 (verifyTimeout + 余裕)。
+ *  これを過ぎた認証完了は verifyTimeout により与信されないので失敗確定しても安全。 */
+const MPI_ABANDON_MS = (MPI_VERIFY_TIMEOUT_MIN + 5) * 60_000;
+
+/** v_result_code のマーカーから「開始からの経過が放置とみなせるか」を判定 */
+function isMpiWaitExpired(vResultCode: string | null): boolean {
+  if (!vResultCode?.startsWith(MPI_WAIT_MARKER)) return false;
+  const t = Number(vResultCode.slice(MPI_WAIT_MARKER.length));
+  return Number.isFinite(t) && Date.now() - t > MPI_ABANDON_MS;
+}
+
+export type Start3dsResult =
+  | { ok: true; accountId: string; orderId: string;
+      /** ACS 認証画面の URL (302/location.href で遷移) */
+      redirect?: string;
+      /** 認証開始URL が無い環境向けの自動遷移 HTML (加工禁止・そのまま描画) */
+      contents?: string }
+  | { ok: false; error: string; vResultCode?: string | null; vtDetail?: string | null };
+
+export async function start3dsSubscription(
+  input: SubscribeInput & { cardholderName?: string | null },
+): Promise<Start3dsResult> {
+  const tenantId = input.tenantId || DEFAULT_TENANT_ID;
+  const plan = await loadPlan(input.planId);
+  if (!plan) return { ok: false, error: "unknown-plan" };
+
+  const cfg = await loadVeritransConfig(tenantId);
+  if (!cfg.merchantCcid || !cfg.merchantKey) return { ok: false, error: "veritrans-not-configured" };
+
+  // 3DS はブラウザ遷移で戻す絶対 URL が必須 (redirectionUri/pushUrl は https)
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+  if (!appUrl.startsWith("https://")) return { ok: false, error: "app-url-not-configured" };
+
+  const accountId = input.caseId ? accountIdFromCaseId(input.caseId) : newAccountId();
+  if (!isValidAccountId(accountId)) return { ok: false, error: "invalid-account-id" };
+
+  const existing = await getContractByAccountId(accountId);
+  if (existing && existing.tenant_id !== tenantId) {
+    return { ok: false, error: "already-subscribed" };
+  }
+  if (existing && existing.status !== "canceled") {
+    // suspended は「3DS 認証待ちで離脱した契約」の可能性がある。前回の取引を VT に照会し、
+    //   成功済み → その場で有効化 (ブラウザ復帰が失われたケースの救済) → already-subscribed
+    //   確定失敗 → 前回試行を閉じて再申込を許可
+    //   結果不明 → 認証がまだ進行中かもしれない (完了されると二重課金になるため再申込は拒否。
+    //              verifyTimeout=15分 経過後は VT 側で確定失敗になり再申込可能になる)
+    if (existing.status === "suspended") {
+      const pendings = await getPending3dsOrders(existing.id);
+      if (!pendings.length) return { ok: false, error: "already-subscribed" };
+      let allFailed = true;
+      for (const p of pendings) {
+        const fin = await finalizeMpiOrder(p);
+        if (fin.state === "activated" || fin.state === "already-active") {
+          return { ok: false, error: "already-subscribed" };
+        }
+        if (fin.state !== "failed" && fin.state !== "already-failed") allFailed = false;
+      }
+      if (!allFailed) return { ok: false, error: "3ds-in-progress" };
+      // 全試行が確定失敗 → 契約は finalizeMpiOrder が canceled 化済み。新規申込として続行
+    } else {
+      return { ok: false, error: "already-subscribed" };
+    }
+  }
+
+  // 同意ログ (§1.1-2) — 決済前に保存 (registerSubscription と同一)
+  const consent: ConsentRecord = {
+    acceptedAt: new Date().toISOString(),
+    termsVersion: input.consent.termsVersion,
+    planId: plan.id,
+    paymentMethod: "card",
+    ip: input.consent.ip ?? undefined,
+    userAgent: input.consent.userAgent ?? undefined,
+  };
+  await insertConsent({
+    tenant_id: tenantId,
+    account_id: accountId,
+    terms_version: consent.termsVersion,
+    plan_id: plan.id,
+    payment_method: "card",
+    ip: consent.ip ?? null,
+    user_agent: consent.userAgent ?? null,
+  });
+
+  const crm = supabaseCrmAdapter(tenantId);
+  const customerId = await crm.upsertCustomer({
+    phone: input.phone,
+    name: input.name,
+    email: input.email ?? undefined,
+    caseId: input.caseId ?? undefined,
+  });
+
+  const policy = await loadBillingPolicy();
+  const freeMonths = policy.freeMonths;
+  const useFreePeriod = freeMonths > 0;
+  const today = todayJst();
+  const serviceStart = normalizeDate(input.serviceStartDate) ?? firstChargeDate(today, 1);
+  const anchorDay = useFreePeriod ? 1 : parseInt(today.slice(8, 10), 10);
+  const nextChargeDate = useFreePeriod
+    ? firstChargeDate(serviceStart, freeMonths)
+    : nextChargeDateAfter(monthOf(today), anchorDay);
+
+  // 契約を「suspended (自動課金対象外)」で先に作る:
+  //   - finalize が orderId → 課金行 → 契約 とたどって申込情報を復元するための置き場
+  //   - suspended は listDueContracts の対象外なので認証完了まで課金されない
+  //   - next_charge_date は有効化後の値を先に入れておく (suspended 中は参照されない)
+  const initAttempt = Math.max(1, await countConsentsForAccount(accountId));
+  const suffix = initAttempt === 1 ? "" : `_s${initAttempt - 1}`;
+  const orderId = `${accountId}_${yyyymmOf(today)}_3ds${suffix}`;
+
+  let contract: ContractRow;
+  if (existing) {
+    await updateContractRow(existing.id, {
+      status: "suspended",
+      plan_id: plan.id,
+      plan_name: plan.name,
+      amount: plan.amount,
+      next_charge_date: nextChargeDate,
+      consecutive_failures: 0,
+      customer_id: customerId,
+      canceled_at: null,
+    });
+    contract = { ...existing, status: "suspended", plan_id: plan.id, amount: plan.amount };
+  } else {
+    contract = await insertContract({
+      tenant_id: tenantId,
+      account_id: accountId,
+      customer_id: customerId,
+      plan_id: plan.id,
+      plan_name: plan.name,
+      amount: plan.amount,
+      payment_method: "card",
+      anchor_day: anchorDay,
+      next_charge_date: nextChargeDate,
+      status: "suspended",
+      contact_name: input.name,
+      contact_phone: input.phone,
+      contact_email: input.email ?? null,
+      free_key: customerId,
+    });
+  }
+  await updateServiceStartDate(contract.id, serviceStart);
+
+  // 課金行 (ok=null) を VT 呼び出し前に確保 — orderId UNIQUE が冪等の要 (§5-② と同型)。
+  // 無料期間ありは 0 円与信 (カード有効性確認+会員登録のみ。ガイド 4.2.1: 少額与信は
+  // ブランドルール禁止・0円で実施) なので amount=0 を記録する。
+  const chargeAmount = useFreePeriod ? 0 : plan.amount;
+  const attempt = await beginChargeAttempt({
+    tenant_id: tenantId,
+    contract_id: contract.id,
+    order_id: orderId,
+    charge_month: monthOf(today),
+    kind: "initial",
+    attempt: initAttempt,
+    amount: chargeAmount,
+  });
+  if (attempt === "duplicate") {
+    // 同一 orderId が処理中 (二重POST等)。進行中扱いにして重複開始を防ぐ
+    return { ok: false, error: "3ds-in-progress" };
+  }
+
+  const res = await authorizeMpi({
+    orderId,
+    amount: chargeAmount,
+    token: input.token,
+    tokenKey: input.tokenKey ?? undefined,
+    accountId,                                  // 会員登録+カード登録を同時実行 (SPEC_CHECK: 2-3)
+    pushUrl: `${appUrl}/api/payments/veritrans/mpi-result`,
+    redirectionUri: `${appUrl}/api/payments/veritrans/mpi-return`,
+    cardholderName: input.cardholderName ?? undefined,
+    cardholderEmail: input.email ?? undefined,  // ブランドルール必須 (メール or 電話)
+    customerIp: input.consent.ip ?? undefined,  // 同 (注3)
+    withCapture: !useFreePeriod,                // 0円与信に true は不可 (ガイド 4.3.1)
+    verifyTimeoutMin: MPI_VERIFY_TIMEOUT_MIN,
+    httpUserAgent: input.consent.userAgent ?? undefined,
+  }, cfg);
+
+  const indeterminate = res.pending || res.indeterminate;
+  if (!res.ok && !indeterminate) {
+    // 認可の確定失敗 (パラメータ不備・カード不正等)。課金行を閉じ、契約を canceled に
+    // 戻して再申込 (orderId は _sN で変わる) を可能にする
+    const vtDetail = extractVtDetail(res.raw);
+    console.error("[payments/3ds] mpi start failed:", res.vResultCode, vtDetail);
+    await finishChargeAttempt(attempt.id, {
+      ok: false, mstatus: res.mstatus, v_result_code: res.vResultCode,
+    });
+    await updateContractRow(contract.id, { status: "canceled", next_charge_date: null, canceled_at: new Date().toISOString() });
+    return { ok: false, error: "charge-failed", vResultCode: res.vResultCode, vtDetail };
+  }
+  if (indeterminate) {
+    // 認可の応答が得られない (通信断等)。VT 側で開始済みの可能性があるため課金行は
+    // ok=null のまま在疑義に残す (/admin の手動確定 or 再申込時の照会で解消)
+    await markChargePending(attempt.id, {
+      mstatus: res.mstatus ?? "unknown",
+      v_result_code: res.vResultCode
+        ?? (res.transportError ? `TRANSPORT:${res.transportError}`.slice(0, 64) : null),
+    });
+    return { ok: false, error: "charge-pending", vResultCode: res.vResultCode };
+  }
+
+  // 認可成功 — ブラウザを ACS へ遷移させる材料を返す。契約はまだ suspended のまま。
+  // 有効化は finalizeMpiOrder (PUSH/ブラウザ復帰 → MpiGetResult 照会) が行う。
+  if (!res.authStartUrl && !res.resResponseContents) {
+    // 3DS2.0 リクエストになっていない (deviceChannel 欠落等) — 実装/設定不備
+    console.error("[payments/3ds] no authStartUrl/resResponseContents in response");
+    await markChargePending(attempt.id, { mstatus: res.mstatus, v_result_code: res.vResultCode });
+    return { ok: false, error: "3ds-start-invalid", vResultCode: res.vResultCode };
+  }
+  // 開始時刻マーカー (確定時に上書きされる)。チャレンジ画面で離脱・放置された取引を
+  // 期限後にみなし失敗へ落とすための起点 (isMpiWaitExpired)
+  await markChargePending(attempt.id, {
+    mstatus: "3ds-authorize-started",
+    v_result_code: `${MPI_WAIT_MARKER}${Date.now()}`,
+  }).catch(() => { /* マーカー失敗でも申込は続行 (期限解放が効かなくなるだけ) */ });
+  return {
+    ok: true, accountId, orderId,
+    redirect: res.authStartUrl,
+    contents: res.authStartUrl ? undefined : res.resResponseContents,
+  };
+}
+
+/** 契約に紐づく未確定 (ok=null) の 3DS 初回取引の orderId 一覧 (再申込時の前回照会用)。
+ *  3DS の orderId は `_3ds` を含む規約 (start3dsSubscription)。 */
+async function getPending3dsOrders(contractId: string): Promise<string[]> {
+  const { createSupabaseService } = await import("@/shared/db/service");
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("order_id")
+    .eq("contract_id", contractId)
+    .is("ok", null)
+    .like("order_id", "%\\_3ds%");
+  if (error) return [];
+  return (data ?? []).map((r: any) => String(r.order_id));
+}
+
+export type FinalizeMpiState =
+  | "activated"        // この呼び出しが契約を有効化した (成功後処理も実行済み)
+  | "already-active"   // 他経路が確定済み (成功)
+  | "failed"           // 認証/決済の失敗として確定した (契約は canceled)
+  | "already-failed"   // 他経路が失敗確定済み
+  | "pending"          // まだ確定できない (認証進行中・照会不達・カード保留)
+  | "unknown-order";   // orderId に対応する課金行が無い (ログのみ・リトライ不要)
+
+export type FinalizeMpiResult = {
+  state: FinalizeMpiState;
+  accountId?: string;
+  nextChargeDate?: string | null;
+  vResultCode?: string | null;
+};
+
+// 3DS 結果の確定 (PUSH / ブラウザ復帰 / 再申込時の救済照会から呼ばれる)。
+// どの経路から何度呼ばれても安全 (claim による冪等化 + 常に VT へ照会して判定)。
+export async function finalizeMpiOrder(orderId: string): Promise<FinalizeMpiResult> {
+  const charge = await getChargeByOrderId(orderId);
+  if (!charge) {
+    console.error("[payments/3ds] finalize: unknown orderId:", orderId.slice(0, 120));
+    return { state: "unknown-order" };
+  }
+  const contract = await getContractById(charge.contract_id);
+  if (!contract) return { state: "unknown-order" };
+
+  if (charge.ok !== null) {
+    // 既に確定済み — 現状を返すだけ (冪等)
+    return charge.ok
+      ? { state: "already-active", accountId: contract.account_id, nextChargeDate: contract.next_charge_date }
+      : { state: "already-failed", accountId: contract.account_id, vResultCode: charge.v_result_code };
+  }
+
+  // 放置された取引をみなし失敗で閉じる (再申込の解放)。verifyTimeout+余裕 経過後は
+  // 遅れて認証が完了しても VT 側で与信されないため、失敗確定しても取りはぐれない
+  const expireAbandoned = async (): Promise<FinalizeMpiResult> => {
+    const claimed = await claimChargeFinalization(charge.id, {
+      ok: false, mstatus: "3ds-expired", v_result_code: "3DS-EXPIRED",
+    }).catch(() => false);
+    if (claimed) {
+      await updateContractRow(contract.id, {
+        status: "canceled", next_charge_date: null, last_result_code: "3DS-EXPIRED",
+        canceled_at: new Date().toISOString(),
+      });
+    }
+    return { state: claimed ? "failed" : "already-failed", accountId: contract.account_id, vResultCode: "3DS-EXPIRED" };
+  };
+
+  const cfg = await loadVeritransConfig(contract.tenant_id);
+  const q = await getMpiResult(orderId, cfg);
+  if (q.indeterminate || !q.ok) {
+    // 照会自体が失敗/不達 — 原則確定しない (PUSH のリトライ or 次の経路に任せる)。
+    // 例外: 0円与信 (無料期間の登録取引・金銭移動なし) は期限超過でみなし失敗にして
+    // 再申込を解放する。金額ありは在疑義のまま /admin の手動確定に委ねる (取りはぐれ防止)
+    if (charge.amount === 0 && isMpiWaitExpired(charge.v_result_code)) return expireAbandoned();
+    return { state: "pending", accountId: contract.account_id };
+  }
+
+  const mpiOk = q.mpiMstatus === "success";
+  const mpiFailed = q.mpiMstatus === "failure";
+  const cardOk = q.cardMstatus === "success";
+  const cardFailed = q.cardMstatus === "failure";
+  const cardPending = q.cardMstatus === "pending";
+  const resultCode = q.mpiVresultCode ?? q.vResultCode ?? null;
+
+  if (!q.mpiMstatus) {
+    // 本人認証の結果がまだ無い = 認証進行中 (チャレンジ入力中など)。
+    // 失敗と誤確定してはならない (完了直前の取り消し→与信成立で不整合になる)。
+    // 期限超過なら放置とみなして閉じる (verifyTimeout 後の与信は成立しないため安全)
+    if (isMpiWaitExpired(charge.v_result_code)) return expireAbandoned();
+    return { state: "pending", accountId: contract.account_id };
+  }
+  if (mpiOk && cardPending) {
+    // カード側が保留 — 在疑義のまま (既存の手動確定フローで解消)
+    return { state: "pending", accountId: contract.account_id, vResultCode: resultCode };
+  }
+  if (mpiOk && !q.cardMstatus) {
+    // 認証は成功したがカード結果が無い:
+    //   - RReq 直後で与信処理中の可能性 → 確定せず待つ (成立しうるので期限でも閉じない)
+    //   - mpi-none 設定 (与信は加盟店実装) は当アプリでは未対応 (.env 参照)
+    return { state: "pending", accountId: contract.account_id, vResultCode: resultCode };
+  }
+
+  if (mpiOk && cardOk) {
+    let claimed = false;
+    try {
+      claimed = await claimChargeFinalization(charge.id, {
+        ok: true, mstatus: "success", v_result_code: resultCode,
+      });
+    } catch (e: any) {
+      // 月次成功の部分 UNIQUE (contract_id, charge_month WHERE ok=true) 衝突 =
+      // 同月に別 orderId の成功が既にある (放置→再申込→両方完了の二重課金痕跡)。
+      // ok=null のまま在疑義に残し、/admin の手動確定 (返金判断) に回す
+      console.error("[payments/3ds] duplicate success for month (possible double capture):",
+        orderId, String(e?.message ?? e));
+      return { state: "pending", accountId: contract.account_id, vResultCode: resultCode };
+    }
+    if (!claimed) {
+      return { state: "already-active", accountId: contract.account_id, nextChargeDate: contract.next_charge_date };
+    }
+
+    // 契約有効化 (next_charge_date は start3ds が計算済み)
+    await updateContractRow(contract.id, {
+      status: "active",
+      consecutive_failures: 0,
+      last_result_code: resultCode,
+      ...(charge.amount > 0 ? { last_charged_at: new Date().toISOString() } : {}),
+    });
+
+    // 成功後処理 (registerSubscription の成功パスと同等)。失敗しても有効化は成立済み
+    const planName = contract.plan_name ?? contract.plan_id;
+    const serviceStart = (await getServiceStartMap([contract.id])).get(contract.id) ?? null;
+    const freePeriod = charge.amount === 0;
+    if (contract.customer_id) {
+      await supabaseCrmAdapter(contract.tenant_id).updateContract(contract.customer_id, {
+        accountId: contract.account_id, planId: contract.plan_id, paymentMethod: "card", status: "active",
+        nextChargeDate: contract.next_charge_date ?? undefined, orderId,
+        lastResult: { vResultCode: resultCode, at: new Date().toISOString() },
+      }).catch(() => { /* CRM メモ更新失敗で確定は失敗させない */ });
+    }
+    await notifyRegistration(contract.tenant_id, {
+      accountId: contract.account_id, planName, amount: contract.amount,
+      name: contract.contact_name ?? "", phone: contract.contact_phone ?? "",
+      email: contract.contact_email,
+      firstChargeDate: freePeriod ? contract.next_charge_date : null,
+    }).catch(() => {});
+    await appendSignupRow({
+      registeredAt: new Date().toISOString(),
+      accountId: contract.account_id, planName,
+      name: contract.contact_name ?? "", phone: contract.contact_phone ?? "",
+    }).catch(() => {});
+    if (contract.contact_email) {
+      await sendWelcomeEmail(contract.tenant_id, {
+        to: contract.contact_email,
+        name: contract.contact_name ?? "",
+        accountId: contract.account_id,
+        planName,
+        amount: contract.amount,
+        serviceStartDate: serviceStart ?? todayJst(),
+        chargeStartDate: contract.next_charge_date ?? "",
+      }).catch((e) => console.error("[payments/3ds] welcome mail failed:", String(e?.message ?? e)));
+    }
+    return { state: "activated", accountId: contract.account_id, nextChargeDate: contract.next_charge_date };
+  }
+
+  // ここに来るのは mpiFailed または (mpiOk && cardFailed) のはず。想定外の値は
+  // 誤確定を避けて保留に落とす (success/failure/pending 以外は仕様外)
+  if (!(mpiFailed || (mpiOk && cardFailed))) {
+    console.error("[payments/3ds] unexpected result statuses:",
+      orderId, q.mpiMstatus, q.cardMstatus);
+    return { state: "pending", accountId: contract.account_id, vResultCode: resultCode };
+  }
+
+  // 認証失敗 or カード与信失敗 (結果判定マトリックス 4-3: GExx 系) — 確定失敗
+  const claimed = await claimChargeFinalization(charge.id, {
+    ok: false, mstatus: q.mpiMstatus ?? q.mstatus, v_result_code: resultCode,
+  }).catch(() => false);
+  if (claimed) {
+    // 契約は作られたが決済に至らなかった — canceled に戻して再申込を可能にする
+    await updateContractRow(contract.id, {
+      status: "canceled", next_charge_date: null, last_result_code: resultCode,
+      canceled_at: new Date().toISOString(),
+    });
+  }
+  return {
+    state: claimed ? "failed" : "already-failed",
+    accountId: contract.account_id, vResultCode: resultCode,
+  };
 }
 
 // ---- 日次課金 (§5-② / §6-5,6) ---------------------------------------------

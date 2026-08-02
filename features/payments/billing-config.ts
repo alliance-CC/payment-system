@@ -21,6 +21,8 @@ export type BillingPolicy = {
   /** 無料期間 (申込月を含むヶ月数)。0 で無料期間なし=申込時に初回課金。
    *  例: 2 → 申込月+翌月は無料、翌々月の1日から課金開始 (§規約 会費 L67「無料期間終了後の翌月から課金」)。 */
   freeMonths: number;
+  /** 毎月の課金日 (1〜28)。継続課金の引き落とし実行日。既定1。月末差異を避けるため28まで。 */
+  chargeDay: number;
   /** 解約時の停止タイミング。end_of_month=当月末まで利用可(翌月から停止・§規約) / immediate=即時停止。 */
   cancelPolicy: "end_of_month" | "immediate";
 };
@@ -39,6 +41,7 @@ export function getBillingPolicy(): BillingPolicy {
     use3ds: String(process.env.VT_USE_3DS ?? "false").toLowerCase() === "true",
     // 既定 2 ヶ月無料 (申込月含む)。OEM/確定変更は PAYMENTS_FREE_MONTHS で上書き (§1.2/§10)。
     freeMonths: Math.max(0, parseInt(process.env.PAYMENTS_FREE_MONTHS ?? "2", 10) || 0),
+    chargeDay: Math.min(28, Math.max(1, parseInt(process.env.PAYMENTS_CHARGE_DAY ?? "1", 10) || 1)),
     cancelPolicy: process.env.PAYMENTS_CANCEL_POLICY === "immediate" ? "immediate" : "end_of_month",
   };
 }
@@ -57,6 +60,7 @@ export async function loadBillingPolicy(): Promise<BillingPolicy> {
     ...(s.termsVersion ? { termsVersion: s.termsVersion } : {}),
     ...(typeof s.cronBatchLimit === "number" ? { cronBatchLimit: s.cronBatchLimit } : {}),
     ...(typeof s.freeMonths === "number" ? { freeMonths: Math.max(0, s.freeMonths) } : {}),
+    ...(typeof s.chargeDay === "number" ? { chargeDay: Math.min(28, Math.max(1, s.chargeDay)) } : {}),
     ...(s.cancelPolicy === "immediate" || s.cancelPolicy === "end_of_month" ? { cancelPolicy: s.cancelPolicy } : {}),
   };
 }
@@ -122,12 +126,14 @@ export function recurringOrderId(accountId: string, yyyymm: string, retryN: numb
  * 例: 申込 2026-05-15, freeMonths=2 → 2026-07-01 (5・6月無料 → 7月課金開始)。
  * 会費対象期間が暦月 (1日〜末日 §規約) のため、初回以降は毎月1日課金 (anchor_day=1) とする。
  */
-export function firstChargeDate(signupDate: string, freeMonths: number): string {
+export function firstChargeDate(signupDate: string, freeMonths: number, day = 1): string {
   const [y, m] = signupDate.split("-").map(Number);
   const idx = y * 12 + (m - 1) + Math.max(0, freeMonths);
   const ny = Math.floor(idx / 12);
   const nm = (idx % 12) + 1;
-  return `${ny}-${String(nm).padStart(2, "0")}-01`;
+  const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();  // 対象月の末日
+  const dd = Math.min(Math.max(1, day), lastDay);
+  return `${ny}-${String(nm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
 }
 
 /**

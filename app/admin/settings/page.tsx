@@ -72,7 +72,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
             <label className="block">
               <div className="label mb-1">無料期間(申込月含む・ヶ月)</div>
               <input name="freeMonths" type="number" min={0} defaultValue={policy.freeMonths} className="input" />
-              <p className="text-[10px] text-muted mt-1">2 = 申込月+翌月無料 → 翌々月1日から課金開始</p>
+              <p className="text-[10px] text-muted mt-1">2 = 利用開始月+翌月無料 → 翌々月から課金開始</p>
+            </label>
+            <label className="block">
+              <div className="label mb-1">課金日(毎月・1〜28)</div>
+              <input name="chargeDay" type="number" min={1} max={28} defaultValue={policy.chargeDay} className="input" />
+              <p className="text-[10px] text-muted mt-1">毎月この日に引き落とし。以降の新規申込に適用（既存契約は現在の課金日を維持）</p>
             </label>
             <label className="block">
               <div className="label mb-1">解約ポリシー</div>

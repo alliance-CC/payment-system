@@ -6,6 +6,7 @@ import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
 export type RegistrantRow = {
   accountId: string;
+  planId: string;           // 現在のプランID (プラン変更のデフォルト選択に使用)
   planName: string;
   appliedAt: string;        // 申込日 (YYYY-MM-DD, JST)
   serviceStart: string;     // 利用開始日 = 加入日の翌月1日 (§規約 有効期間)
@@ -79,7 +80,7 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
     // 課金開始日: 利用開始日 + freeMonths の1日 (無料期間0なら利用開始日)
     const chargeBasis = chosen ?? applied;
     const chargeStart = chargeBasis
-      ? (policy.freeMonths > 0 ? firstChargeDate(chargeBasis, policy.freeMonths) : chargeBasis)
+      ? (policy.freeMonths > 0 ? firstChargeDate(chargeBasis, policy.freeMonths, policy.chargeDay) : chargeBasis)
       : "";
     const canceledAt = c.canceled_at ? jstDate(c.canceled_at) : null;
 
@@ -109,6 +110,7 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
 
     return {
       accountId: c.account_id,
+      planId: c.plan_id ?? "",
       planName: c.plan_name ?? c.plan_id ?? "",
       appliedAt: applied,
       serviceStart,
