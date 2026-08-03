@@ -176,6 +176,9 @@ export default function SignupFlow({
   // 規約タブを閉じれば入力内容を保ったまま戻れる (window.openで開くとタブ側で閉じられる)。
   const termsHref = `/legal/terms/${planId}?from=subscribe`;
   const openTerms = (e: React.MouseEvent) => { e.preventDefault(); window.open(termsHref, "_blank"); };
+  // 両プランに含まれる「ネットライフサポート」規約
+  const netlifeHref = `/legal/terms/netlife?from=subscribe`;
+  const openNetlife = (e: React.MouseEvent) => { e.preventDefault(); window.open(netlifeHref, "_blank"); };
 
   return (
     <>
@@ -254,15 +257,19 @@ export default function SignupFlow({
               </p>
             </div>
 
-            {/* 規約リンク（申込プランの利用規約）＋同意チェック */}
-            <div className="pt-1">
+            {/* 規約リンク（申込プランの利用規約＋ネットライフサポート）＋同意チェック */}
+            <div className="pt-1 space-y-1.5">
               <a href={termsHref} target="_blank" rel="noopener" onClick={openTerms}
-                 className="inline-flex items-center gap-1 text-[13px] text-accent underline font-medium">
+                 className="flex items-center gap-1 text-[13px] text-accent underline font-medium">
                 「{plan?.name ?? "本プラン"}」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
+              </a>
+              <a href={netlifeHref} target="_blank" rel="noopener" onClick={openNetlife}
+                 className="flex items-center gap-1 text-[13px] text-accent underline font-medium">
+                「ネットライフサポート」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
               </a>
               <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
                 <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
-                <span>利用規約の内容を確認し、同意します</span>
+                <span>上記いずれの利用規約の内容も確認し、同意します</span>
               </label>
             </div>
           </div>
