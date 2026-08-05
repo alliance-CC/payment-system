@@ -3,6 +3,7 @@
 //   目次(部→条アンカー)・部ごと大見出し・条ごと小見出し＋本文。列挙はインデント。
 // 文言は支給された原文(terms-data.ts)を保持し、改変しない。
 import Link from "next/link";
+import { Info } from "lucide-react";
 import type { DocTerms } from "./terms-data";
 import CloseTabButton from "./CloseTabButton";
 
@@ -37,6 +38,28 @@ export default function DocTermsView({
       {terms.intro.length > 0 && (
         <div className="card p-4 mt-6 text-[13px] leading-relaxed text-ink space-y-2">
           {terms.intro.map((p, i) => <p key={i}>{p}</p>)}
+        </div>
+      )}
+
+      {/* 当社注記: 各社規約(単体販売前提)と当社パッケージの適用関係を整理する。
+          規約本文とは別物であることが一目でわかるよう配色を変えて掲示する。 */}
+      {terms.note && (
+        <div className="mt-6 rounded-xl border-2 border-navy/25 bg-navy/[0.04] p-4">
+          <div className="flex items-start gap-2">
+            <Info size={16} className="text-navy shrink-0 mt-0.5" />
+            <div className="font-semibold text-navy text-[13px]">{terms.note.heading}</div>
+          </div>
+          <ul className="mt-2 space-y-1.5 pl-1">
+            {terms.note.paras.map((p, i) => (
+              <li key={i} className="text-[13px] leading-relaxed text-ink flex gap-2">
+                <span className="text-navy/50 shrink-0">•</span>
+                <span>{p}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-muted mt-2.5 pl-1">
+            ※ 以下に掲載する規約本文は、提供元が定めた内容をそのまま掲載しています。
+          </p>
         </div>
       )}
 
