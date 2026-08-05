@@ -35,7 +35,7 @@ export default function TermsIndexPage() {
         ))}
       </div>
 
-      <div className="mt-4">
+      <div className="grid gap-3 mt-4">
         <Link
           href="/legal/terms/netlife"
           className="card p-4 flex items-center justify-between gap-3 hover:border-navy/40 transition-colors"
@@ -43,6 +43,16 @@ export default function TermsIndexPage() {
           <div>
             <div className="font-semibold text-navy">ネットライフサポート 利用規約</div>
             <div className="text-[12px] text-muted mt-0.5">両プランに含まれるネット詐欺相談サービス＋ネット詐欺保険の規約（提供元：日本ＰＣサービス株式会社）</div>
+          </div>
+          <ArrowRight size={18} className="text-accent shrink-0" />
+        </Link>
+        <Link
+          href="/legal/terms/virusbuster"
+          className="card p-4 flex items-center justify-between gap-3 hover:border-navy/40 transition-colors"
+        >
+          <div>
+            <div className="font-semibold text-navy">ウイルスバスター 利用規約</div>
+            <div className="text-[12px] text-muted mt-0.5">プレミアムに含まれるセキュリティの規約（提供元：トレンドマイクロ株式会社）</div>
           </div>
           <ArrowRight size={18} className="text-accent shrink-0" />
         </Link>
