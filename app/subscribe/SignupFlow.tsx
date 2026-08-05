@@ -179,6 +179,9 @@ export default function SignupFlow({
   // 両プランに含まれる「ネットライフサポート」規約
   const netlifeHref = `/legal/terms/netlife?from=subscribe`;
   const openNetlife = (e: React.MouseEvent) => { e.preventDefault(); window.open(netlifeHref, "_blank"); };
+  // プレミアムに含まれる「ウイルスバスター」規約
+  const vbHref = `/legal/terms/virusbuster?from=subscribe`;
+  const openVb = (e: React.MouseEvent) => { e.preventDefault(); window.open(vbHref, "_blank"); };
 
   return (
     <>
@@ -267,6 +270,12 @@ export default function SignupFlow({
                  className="flex items-center gap-1 text-[13px] text-accent underline font-medium">
                 「ネットライフサポート」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
               </a>
+              {planId === "premium" && (
+                <a href={vbHref} target="_blank" rel="noopener" onClick={openVb}
+                   className="flex items-center gap-1 text-[13px] text-accent underline font-medium">
+                  「ウイルスバスター」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
+                </a>
+              )}
               <label className="flex items-start gap-2 text-sm cursor-pointer mt-2">
                 <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
                 <span>上記いずれの利用規約の内容も確認し、同意します</span>

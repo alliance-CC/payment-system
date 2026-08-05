@@ -104,18 +104,28 @@ export default function TermsView({ terms, fromSubscribe }: { terms: PlanTerms; 
         ))}
       </div>
 
-      {/* 関連規約: ネットライフサポート（両プランに含まれる） */}
+      {/* 関連規約: 本プランに含まれる個別サービスの規約 */}
       <div className="card p-4 mt-8 text-[13px] text-ink">
         <div className="font-semibold text-navy mb-1">あわせてご確認ください</div>
         <p className="text-muted mb-2">
-          本プランには「ネットライフサポート」（ネット詐欺相談サービス＋ネット詐欺保険）が含まれます。別途、以下の規約が適用されます。
+          本プランに含まれる以下のサービスには、別途それぞれの規約が適用されます。
         </p>
-        <Link
-          href={`/legal/terms/netlife${fromSubscribe ? "?from=subscribe" : ""}`}
-          className="text-accent font-medium hover:underline"
-        >
-          ネットライフサポート 利用規約を確認する →
-        </Link>
+        <div className="flex flex-col gap-1">
+          <Link
+            href={`/legal/terms/netlife${fromSubscribe ? "?from=subscribe" : ""}`}
+            className="text-accent font-medium hover:underline"
+          >
+            ネットライフサポート 利用規約を確認する →
+          </Link>
+          {terms.planId === "premium" && (
+            <Link
+              href={`/legal/terms/virusbuster${fromSubscribe ? "?from=subscribe" : ""}`}
+              className="text-accent font-medium hover:underline"
+            >
+              ウイルスバスター 利用規約を確認する →
+            </Link>
+          )}
+        </div>
       </div>
 
       {/* 事業者情報 */}
