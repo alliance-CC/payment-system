@@ -110,7 +110,10 @@ export default function DocTermsView({
 
       {/* 事業者・提供元・保険会社情報 */}
       <div className="card p-4 mt-8 text-[13px] text-ink">
-        <div className="font-semibold text-navy mb-1.5">お問い合わせ・事業者情報</div>
+        <div className="font-semibold text-navy mb-0.5">お問い合わせ・事業者情報</div>
+        <p className="text-[11px] text-muted mb-2.5">
+          お問い合わせ内容により窓口が異なります。下記のうち該当する窓口までご連絡ください。
+        </p>
         <div className="space-y-3">
           {contacts.map((c, i) => (
             <div key={i}>
