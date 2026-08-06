@@ -98,7 +98,9 @@ export default function SignupFlow({
       });
       const json = await res.json().catch(() => null);
       if (!res.ok || !json?.ok) {
-        const code = json?.vResultCode ? ` (コード: ${json.vResultCode})` : "";
+        // 原因不明で終わらせない: 応答が読めない(500 等)場合も含め必ず手掛かりを残す
+        const reason = json?.vResultCode ?? json?.error ?? `HTTP${res.status}`;
+        const code = reason ? ` (コード: ${reason})` : "";
         const msg = json?.error === "already-subscribed"
           ? "この案件は既にお申し込み済みです"
           : json?.error === "charge-pending"
@@ -111,6 +113,8 @@ export default function SignupFlow({
           ? "アクセスが集中しています。しばらく待ってから再度お試しください"
           : json?.error === "email-required"
           ? "メールアドレスをご入力ください"
+          : json?.error === "veritrans-not-configured" || json?.error === "app-url-not-configured"
+          ? `ただいまお申し込みを受け付けできません。恐れ入りますが、お電話にてお問い合わせください${code}`
           : `お申し込みに失敗しました${code}`;
         setError(json?.vtDetail ? `${msg}\n詳細: ${json.vtDetail}` : msg);
         return;
