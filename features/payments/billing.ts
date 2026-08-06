@@ -273,11 +273,13 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
   }
 
   // 登録通知メール (§1.1-5: 自社宛。顧客情報・契約プラン・会員ID)
+  // ここは決済成功・契約作成の後。通知の失敗で申込を失敗扱いにすると
+  // 「カードは登録済みなのに顧客には失敗と表示」→再申込で二重登録になるため必ず握る
   await notifyRegistration(tenantId, {
     accountId, planName: plan.name, amount: plan.amount,
     name: input.name, phone: input.phone, email: input.email ?? null,
     firstChargeDate: useFreePeriod ? nextChargeDate : null,
-  });
+  }).catch((e) => console.error("[payments] registration notify failed:", String(e?.message ?? e)));
 
   // 申込データをスプレッドシートへ追記 (CRM を使わない当面の受け皿)。
   // 未設定/失敗でも申込は成功させる (非ブロッキング)
@@ -974,7 +976,9 @@ async function chargeContractOnce(
       last_result_code: result.vResultCode,
       consecutive_failures: contract.consecutive_failures + 1,
     });
-    await notifyCardExpired(contract);
+    // 通知失敗でこの契約の処理を落とさない (状態更新は上で済んでいる)
+    await notifyCardExpired(contract).catch((e) =>
+      console.error("[payments] card-expired notify failed:", String(e?.message ?? e)));
     await crm?.updateContract(contract.customer_id!, {
       accountId: contract.account_id, planId: contract.plan_id, paymentMethod: contract.payment_method,
       status: "failed", orderId,
