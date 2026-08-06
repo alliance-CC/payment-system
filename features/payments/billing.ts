@@ -47,6 +47,27 @@ export type SubscribeResult =
   | { ok: true; accountId: string; orderId: string; nextChargeDate: string }
   | { ok: false; error: string; vResultCode?: string | null; vtDetail?: string | null };
 
+// CRM への顧客 upsert (§5)。CRM 側は「照合・表示用の緩い紐付け」であり、契約状態の一次
+// ソースは payment_contracts (氏名/電話/メールも contact_* に保持) 。したがって CRM が
+// 未整備・不通でも申込と決済は成立させる ─ ここで throw させると顧客が申し込めなくなる。
+// 失敗時は customer_id / free_key が null になるだけで、後から紐付け直せる。
+async function upsertCustomerBestEffort(
+  crm: ReturnType<typeof supabaseCrmAdapter>,
+  input: SubscribeInput,
+): Promise<string | null> {
+  try {
+    return await crm.upsertCustomer({
+      phone: input.phone,
+      name: input.name,
+      email: input.email ?? undefined,
+      caseId: input.caseId ?? undefined,
+    });
+  } catch (e: any) {
+    console.error("[payments] CRM upsert failed (continuing without CRM link):", String(e?.message ?? e));
+    return null;
+  }
+}
+
 // VeriTrans 応答から人間可読なエラー詳細 (どのパラメータが不正か等) を安全に抽出する。
 // 応答にカード番号・セキュリティコードは含まれないが、念のため PAN/コード様の桁は伏せる
 function extractVtDetail(raw: any): string | null {
@@ -104,12 +125,7 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
 
   // CRM 照合 → upsert (§1.1-6 / §5 オープン申込)
   const crm = supabaseCrmAdapter(tenantId);
-  const customerId = await crm.upsertCustomer({
-    phone: input.phone,
-    name: input.name,
-    email: input.email ?? undefined,
-    caseId: input.caseId ?? undefined,
-  });
+  const customerId = await upsertCustomerBestEffort(crm, input);
 
   // 申込時の VeriTrans 処理 (§1.1-5 / §規約 会費 L67):
   //   無料期間 (freeMonths ヶ月・申込月含む) がある場合、申込時は「会員登録+カード登録」
@@ -138,7 +154,7 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
     amount: plan.amount,
     token: input.token,
     tokenKey: input.tokenKey ?? undefined,
-    freeKey: customerId,                                // CRM 相互参照 (§5)
+    freeKey: customerId ?? undefined,                   // CRM 相互参照 (§5。未連携なら送らない)
     capture: !useFreePeriod,
   }, cfg);
 
@@ -247,12 +263,14 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
     return { ok: false, error: "charge-pending", vResultCode: result.vResultCode };
   }
 
-  // CRM へ契約状態を反映 (§6-6)
-  await crm.updateContract(customerId, {
-    accountId, planId: plan.id, paymentMethod: "card", status: "active",
-    nextChargeDate, orderId,
-    lastResult: { vResultCode: result.vResultCode, at: new Date().toISOString() },
-  }).catch(() => { /* CRM メモ更新失敗で申込は失敗させない */ });
+  // CRM へ契約状態を反映 (§6-6)。CRM 未連携 (customerId=null) の場合はスキップする
+  if (customerId) {
+    await crm.updateContract(customerId, {
+      accountId, planId: plan.id, paymentMethod: "card", status: "active",
+      nextChargeDate, orderId,
+      lastResult: { vResultCode: result.vResultCode, at: new Date().toISOString() },
+    }).catch(() => { /* CRM メモ更新失敗で申込は失敗させない */ });
+  }
 
   // 登録通知メール (§1.1-5: 自社宛。顧客情報・契約プラン・会員ID)
   await notifyRegistration(tenantId, {
@@ -456,12 +474,7 @@ export async function start3dsSubscription(
   });
 
   const crm = supabaseCrmAdapter(tenantId);
-  const customerId = await crm.upsertCustomer({
-    phone: input.phone,
-    name: input.name,
-    email: input.email ?? undefined,
-    caseId: input.caseId ?? undefined,
-  });
+  const customerId = await upsertCustomerBestEffort(crm, input);
 
   const policy = await loadBillingPolicy();
   const freeMonths = policy.freeMonths;
