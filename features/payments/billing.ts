@@ -386,7 +386,7 @@ export type Start3dsResult =
   | { ok: false; error: string; vResultCode?: string | null; vtDetail?: string | null };
 
 export async function start3dsSubscription(
-  input: SubscribeInput & { cardholderName?: string | null },
+  input: SubscribeInput & { cardholderName?: string | null; requestOrigin?: string | null },
 ): Promise<Start3dsResult> {
   const tenantId = input.tenantId || DEFAULT_TENANT_ID;
   const plan = await loadPlan(input.planId);
@@ -395,8 +395,14 @@ export async function start3dsSubscription(
   const cfg = await loadVeritransConfig(tenantId);
   if (!cfg.merchantCcid || !cfg.merchantKey) return { ok: false, error: "veritrans-not-configured" };
 
-  // 3DS はブラウザ遷移で戻す絶対 URL が必須 (redirectionUri/pushUrl は https)
-  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+  // 3DS はブラウザ遷移で戻す絶対 URL が必須 (redirectionUri/pushUrl は https)。
+  // NEXT_PUBLIC_* はビルド時に埋め込まれるため、環境変数の設定後に再ビルドされていない
+  // デプロイやプレビュー環境では空になりうる。実リクエストの origin を確実な代替とする
+  // (env は明示指定の上書き手段として優先)。
+  const envUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+  const appUrl = envUrl.startsWith("https://")
+    ? envUrl
+    : (input.requestOrigin ?? "").replace(/\/+$/, "");
   if (!appUrl.startsWith("https://")) return { ok: false, error: "app-url-not-configured" };
 
   const accountId = input.caseId ? accountIdFromCaseId(input.caseId) : newAccountId();

@@ -74,10 +74,27 @@ export async function POST(req: Request) {
     if (holder.length < 2) {
       return NextResponse.json({ error: "cardholder-name-required" }, { status: 400 });
     }
-    const started = await start3dsSubscription({
-      ...subscribeInput,
-      cardholderName: holder.slice(0, 45),
-    });
+    // 3DS の戻り先/通知先に使う絶対URL。NEXT_PUBLIC_APP_URL 未設定(env設定後に再ビルド
+    // されていない・プレビュー環境等)でも申込が落ちないよう実リクエストの origin を渡す。
+    const proto = req.headers.get("x-forwarded-proto") ?? "https";
+    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+    const requestOrigin = host ? `${proto}://${host}` : "";
+
+    // ⚠️ ここで例外を素通しすると Next.js が error フィールドの無い 500 を返し、画面には
+    //    原因不明の「お申し込みに失敗しました」しか出ず調査できない。必ず捕捉して
+    //    原因を含む構造化エラーとして返す。
+    let started: Awaited<ReturnType<typeof start3dsSubscription>>;
+    try {
+      started = await start3dsSubscription({
+        ...subscribeInput,
+        cardholderName: holder.slice(0, 45),
+        requestOrigin,
+      });
+    } catch (e: any) {
+      const detail = String(e?.message ?? e).slice(0, 300);
+      console.error("[payments/subscribe] 3ds start threw:", detail);
+      return NextResponse.json({ ok: false, error: "3ds-start-error", vtDetail: detail }, { status: 500 });
+    }
     if (!started.ok) {
       const status = started.error === "charge-failed" ? 402
         : started.error === "veritrans-not-configured" || started.error === "app-url-not-configured" ? 503
@@ -92,7 +109,15 @@ export async function POST(req: Request) {
     });
   }
 
-  const result = await registerSubscription(subscribeInput);
+  // 3DS 経路と同様、例外は捕捉して原因コード付きで返す (原因不明の 500 を出さない)
+  let result: Awaited<ReturnType<typeof registerSubscription>>;
+  try {
+    result = await registerSubscription(subscribeInput);
+  } catch (e: any) {
+    const detail = String(e?.message ?? e).slice(0, 300);
+    console.error("[payments/subscribe] register threw:", detail);
+    return NextResponse.json({ ok: false, error: "subscribe-error", vtDetail: detail }, { status: 500 });
+  }
 
   if (!result.ok) {
     const status = result.error === "charge-failed" ? 402
