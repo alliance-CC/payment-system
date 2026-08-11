@@ -5,7 +5,7 @@ import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE
 import { cancelSubscription } from "@/features/payments/billing";
 import { hardDeleteContractByAccountId, getContractByAccountId, updateContractRow } from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
-import { chargeByAccount } from "@/features/payments/veritrans/paynowid";
+import { chargeByAccount, deleteAccount } from "@/features/payments/veritrans/paynowid";
 import { loadVeritransConfig } from "@/features/payments/veritrans/config";
 import { savePaymentSettings, loadPaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
@@ -112,6 +112,19 @@ export async function deleteAction(formData: FormData): Promise<void> {
   const isProd = String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true";
   const allowDelete = String(process.env.PAYMENTS_ALLOW_DELETE ?? "").toLowerCase() === "true";
   if (isProd && !allowDelete) redirect(to("blocked"));
+
+  // ③ 決済代行側の後始末: DBから消すだけだと VeriTrans に会員とカードが残り続ける。
+  //    案件を消す=その顧客の登録を無かったことにする、なので会員データも削除する。
+  //    失敗しても DB 削除は続行する (VT 側は管理画面から手動削除できる)。
+  const contract = await getContractByAccountId(accountId);
+  if (contract) {
+    const cfg = await loadVeritransConfig(contract.tenant_id);
+    const vt = await deleteAccount(accountId, cfg).catch(() => null);
+    if (!vt?.ok) {
+      console.error("[admin/delete] VeriTrans account delete failed (DB削除は継続):",
+        accountId, vt?.vResultCode ?? "no-response");
+    }
+  }
 
   const res = await hardDeleteContractByAccountId(accountId);
   redirect(to(res.ok ? "ok" : "err"));

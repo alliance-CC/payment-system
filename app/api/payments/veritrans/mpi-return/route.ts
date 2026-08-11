@@ -13,6 +13,13 @@ import { rateLimit, clientIpOf } from "@/shared/utils/rateLimit";
 // ・PUSH (mpi-result) と非同期・順不同 — どちらが先でも同じ結果になる。
 //
 // 処理後は結果表示ページ /subscribe/complete へ 303 リダイレクト (PRG パターン)。
+//
+// 確定処理は MpiGetResult 照会 → 契約更新 → 通知メール → スプレッドシート反映 まで行う。
+// 既定の実行時間ではタイムアウトしうるが、ここで落ちると「登録は成立しているのに
+// 購入者にはエラー画面が出る」ため余裕を持たせる。
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
 async function handle(req: Request): Promise<Response> {
   // ブラウザから叩かれるオープンな口のため、照会連打の防壁として軽いレート制限
   const rl = rateLimit(`mpi-return:${clientIpOf(req)}`, { limit: 20, windowMs: 60_000 });
