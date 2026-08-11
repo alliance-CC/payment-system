@@ -152,33 +152,27 @@ export default async function AdminBoardPage({
           </div>
         </div>
 
-        {/* ④ CSV出力: エントリー(申込日軸) / 解約(解約日軸) を期間指定で出力 */}
-        <div className="card p-4">
-          <div className="flex items-center gap-1.5 mb-2">
-            <Download size={14} className="text-navy" />
-            <h2 className="font-semibold text-navy text-sm">CSV出力</h2>
-          </div>
-          <form method="get" className="flex items-end gap-2 flex-wrap">
-            <div>
-              <div className="label mb-1">開始日</div>
-              <input type="date" name="from" defaultValue={today} className="input" required />
-            </div>
-            <div>
-              <div className="label mb-1">終了日</div>
-              <input type="date" name="to" defaultValue={today} className="input" required />
-            </div>
-            <button formAction="/admin/export/entry" className="btn btn-primary flex items-center gap-1">
-              <Download size={14} />エントリーCSV
+        {/* ④ CSV出力: 普段は畳んでおき、押したときだけ期間指定を出す (一覧の邪魔をしない) */}
+        <details className="card px-3 py-2">
+          <summary className="flex items-center gap-1.5 cursor-pointer text-sm font-medium text-navy list-none">
+            <Download size={14} />CSV出力
+            <span className="text-[11px] text-muted font-normal ml-1">（エントリー / 解約・期間指定）</span>
+          </summary>
+          <form method="get" className="flex items-end gap-2 flex-wrap mt-2.5">
+            <input type="date" name="from" defaultValue={today} className="input py-1 text-xs" required aria-label="開始日" />
+            <span className="text-muted text-xs pb-1.5">〜</span>
+            <input type="date" name="to" defaultValue={today} className="input py-1 text-xs" required aria-label="終了日" />
+            <button formAction="/admin/export/entry" className="btn btn-primary text-xs py-1 flex items-center gap-1">
+              <Download size={12} />エントリー
             </button>
-            <button formAction="/admin/export/cancel" className="btn flex items-center gap-1">
-              <Download size={14} />解約CSV
+            <button formAction="/admin/export/cancel" className="btn text-xs py-1 flex items-center gap-1">
+              <Download size={12} />解約
             </button>
+            <span className="text-[11px] text-muted pb-1.5">
+              エントリー=申込日 / 解約=解約日 で抽出
+            </span>
           </form>
-          <p className="text-[11px] text-muted mt-2">
-            エントリーCSVは<b>申込日</b>、解約CSVは<b>解約日</b>を軸に、指定した期間の案件を出力します
-            （同じ日を指定すればその日1日分）。
-          </p>
-        </div>
+        </details>
 
         {/* ステータスタブ */}
         <div className="flex flex-wrap gap-1.5">
