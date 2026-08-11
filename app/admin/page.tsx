@@ -81,7 +81,7 @@ export default async function AdminBoardPage({
     loadBoard({ month, status, q }),
     loadPlans(),
   ]);
-  const exportQs = new URLSearchParams({ month, status, q }).toString();
+  const today = todayJst();   // CSV出力の期間の既定値 (当日1日分)
 
   return (
     <main className="min-h-screen bg-bg p-4 sm:p-6">
@@ -96,9 +96,6 @@ export default async function AdminBoardPage({
             <Link href={`/admin/revenue?month=${month}`} className="btn btn-primary flex items-center gap-1">
               <TrendingUp size={14} />売上予測ボード
             </Link>
-            <a href={`/admin/export?${exportQs}`} className="btn flex items-center gap-1" title="現在の絞り込み（状況タブ・検索）を反映して出力します">
-              <Download size={14} />CSV出力（絞り込み反映）
-            </a>
             <Link href={`/admin?month=${month}&status=${status}&q=${encodeURIComponent(q)}`} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
             </Link>
@@ -155,6 +152,34 @@ export default async function AdminBoardPage({
           </div>
         </div>
 
+        {/* ④ CSV出力: エントリー(申込日軸) / 解約(解約日軸) を期間指定で出力 */}
+        <div className="card p-4">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Download size={14} className="text-navy" />
+            <h2 className="font-semibold text-navy text-sm">CSV出力</h2>
+          </div>
+          <form method="get" className="flex items-end gap-2 flex-wrap">
+            <div>
+              <div className="label mb-1">開始日</div>
+              <input type="date" name="from" defaultValue={today} className="input" required />
+            </div>
+            <div>
+              <div className="label mb-1">終了日</div>
+              <input type="date" name="to" defaultValue={today} className="input" required />
+            </div>
+            <button formAction="/admin/export/entry" className="btn btn-primary flex items-center gap-1">
+              <Download size={14} />エントリーCSV
+            </button>
+            <button formAction="/admin/export/cancel" className="btn flex items-center gap-1">
+              <Download size={14} />解約CSV
+            </button>
+          </form>
+          <p className="text-[11px] text-muted mt-2">
+            エントリーCSVは<b>申込日</b>、解約CSVは<b>解約日</b>を軸に、指定した期間の案件を出力します
+            （同じ日を指定すればその日1日分）。
+          </p>
+        </div>
+
         {/* ステータスタブ */}
         <div className="flex flex-wrap gap-1.5">
           {STATUS_TABS.map((t) => (
@@ -181,6 +206,7 @@ export default async function AdminBoardPage({
                 <th className="px-3 py-2 font-medium">状況</th>
                 <th className="px-3 py-2 font-medium">当月課金 ({month})</th>
                 <th className="px-3 py-2 font-medium">お客様</th>
+                <th className="px-3 py-2 font-medium">ライセンスキー</th>
                 <th className="px-3 py-2 font-medium">支払方法</th>
                 <th className="px-3 py-2 font-medium">規約</th>
                 <th className="px-3 py-2 font-medium">解約日</th>
@@ -217,6 +243,11 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.name ?? "-"}</div>
                     <div className="text-[11px] text-muted">{r.phone ?? "-"}{r.email ? ` / ${r.email}` : ""}</div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.licenseKey
+                      ? <span className="font-mono text-[11px]">{r.licenseKey}</span>
+                      : <span className="text-muted">—</span>}
                   </td>
                   <td className="px-3 py-2 text-muted">{r.paymentMethod}</td>
                   <td className="px-3 py-2">{r.consented ? <span className="chip chip-good">同意済</span> : <span className="chip chip-bad">未同意</span>}</td>

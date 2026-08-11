@@ -16,6 +16,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
   const raw = await loadPaymentSettings();
   const welcomeSubject = raw.welcomeEmail?.subject || DEFAULT_WELCOME_SUBJECT;
   const welcomeBody = raw.welcomeEmail?.body || DEFAULT_WELCOME_BODY;
+  const stock = raw.licenseStock ?? null;   // ② 毎朝9時の Cron が更新する在庫集計
   // 追加入力用の空行を3つ確保
   const rows = [...plans, ...Array(3).fill(null)].slice(0, Math.max(plans.length + 2, 4));
 
@@ -117,6 +118,45 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
               <div className="label mb-1">規約バージョン</div>
               <input name="termsVersion" defaultValue={policy.termsVersion} className="input" />
             </label>
+          </section>
+
+          {/* 連携スプレッドシート (①②③) */}
+          <section className="card p-4 space-y-3">
+            <h2 className="font-semibold text-navy text-sm">連携スプレッドシート</h2>
+            <p className="text-[11px] text-muted">
+              申込を「エントリー」タブ、解約を「解約」タブへ記録し、「ライセンスキー」タブから
+              プレミアム申込者へウイルスバスターのライセンスキーを順に付与します。
+              シートの共有設定でサービスアカウント(GOOGLE_SHEETS_CLIENT_EMAIL)に編集権限を付与してください。
+            </p>
+            <label className="block">
+              <div className="label mb-1">スプレッドシートID</div>
+              <input
+                name="signupSheetId"
+                defaultValue={raw.signupSheetId ?? ""}
+                placeholder="URLの /d/ と /edit の間の文字列"
+                className="input w-full font-mono text-xs"
+              />
+              <p className="text-[10px] text-muted mt-1">
+                例: https://docs.google.com/spreadsheets/d/<b>ここがID</b>/edit
+              </p>
+            </label>
+            <div className="rounded-lg border border-border p-3">
+              <div className="label mb-1">ライセンスキー残数(ウイルスバスター)</div>
+              {stock ? (
+                <>
+                  <p className="text-sm text-ink">
+                    残り <b className={stock.remaining <= 10 ? "text-bad" : "text-good"}>{stock.remaining}</b> 件
+                    <span className="text-muted"> ／ 全 {stock.total} 件（使用済 {stock.used} 件）</span>
+                  </p>
+                  <p className="text-[10px] text-muted mt-0.5">
+                    毎朝9時に自動集計 — 最終集計:{" "}
+                    {new Date(stock.checkedAt).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted">未集計（毎朝9時に自動集計します）</p>
+              )}
+            </div>
           </section>
 
           {/* 登録完了メール (利用者宛) */}

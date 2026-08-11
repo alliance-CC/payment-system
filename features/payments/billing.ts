@@ -13,11 +13,12 @@ import { loadPlan } from "./plans";
 import { newAccountId, accountIdFromCaseId, isValidAccountId } from "./account";
 import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
 import { appendSignupRow } from "./signup-sheet";
+import { appendEntryRow, appendCancelRow, assignLicenseKey } from "./entry-sheet";
 import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
-  insertConsent, updateServiceStartDate, getServiceStartMap,
+  insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey,
   getChargeByOrderId, claimChargeFinalization, type ContractRow,
 } from "./store";
 import {
@@ -65,6 +66,65 @@ async function upsertCustomerBestEffort(
   } catch (e: any) {
     console.error("[payments] CRM upsert failed (continuing without CRM link):", String(e?.message ?? e));
     return null;
+  }
+}
+
+// timestamptz(UTC) → JST の日付 (YYYY-MM-DD)。シート/CSV の日付表記に使う。
+function jstDateOf(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return new Date(d.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+// 氏名は `姓 名` (申込フォームで姓/名を別入力し空白連結) で保持している。
+// スプレッドシート/CSV は姓・名が別項目のため最初の空白で分割する。
+// 空白が無い(1語のみ)場合は姓に寄せる。
+export function splitName(full: string | null | undefined): { last: string; first: string } {
+  const s = (full ?? "").trim().replace(/[　]/g, " ");
+  const i = s.indexOf(" ");
+  if (i < 0) return { last: s, first: "" };
+  return { last: s.slice(0, i).trim(), first: s.slice(i + 1).trim() };
+}
+
+/** ウイルスバスター(=セキュリティ)を含むプランか。プレミアムのみライセンスキーを付与する(②)。
+ *  プラン名の変更にも耐えるよう id と名称の両方で判定する。 */
+export function planIncludesVirusBuster(planId: string, planName?: string | null): boolean {
+  return planId === "premium" || (planName ?? "").includes("プレミアム");
+}
+
+// ① 申込をエントリータブへ記録し、② プレミアムならライセンスキーを付与する。
+// いずれもシート連携であり、失敗しても申込は成立させる (非ブロッキング)。
+async function recordEntryAndLicense(v: {
+  contractId: string;
+  accountId: string;
+  planId: string;
+  planName: string;
+  contractDate: string;      // 申込日
+  serviceStartDate: string;
+  chargeStartDate: string;
+  name: string | null;
+  phone: string | null;
+}): Promise<void> {
+  const { last, first } = splitName(v.name);
+  await appendEntryRow({
+    customerId: v.accountId,
+    contractDate: v.contractDate,
+    serviceStartDate: v.serviceStartDate,
+    chargeStartDate: v.chargeStartDate,
+    lastNameKanji: last,
+    firstNameKanji: first,
+    mobilePhone: v.phone ?? "",
+    serviceName: v.planName,
+  }).catch((e) => console.error("[payments] entry sheet failed:", String(e?.message ?? e)));
+
+  if (!planIncludesVirusBuster(v.planId, v.planName)) return;   // プラスは付与しない
+  try {
+    const key = await assignLicenseKey(v.accountId);
+    if (key) await updateLicenseKey(v.contractId, key);
+    else console.error("[payments] license key not assigned (stock empty or sheet unavailable):", v.accountId);
+  } catch (e: any) {
+    console.error("[payments] license key assign failed:", String(e?.message ?? e));
   }
 }
 
@@ -288,6 +348,19 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
     accountId, planName: plan.name,
     name: input.name, phone: input.phone,
   }).catch(() => { /* シート追記失敗で申込は失敗させない */ });
+
+  // ①③ 連携スプレッドシート「エントリー」へ記録 + ② プレミアムならライセンスキー付与
+  await recordEntryAndLicense({
+    contractId: contract.id,
+    accountId,
+    planId: plan.id,
+    planName: plan.name,
+    contractDate: today,                 // ご契約日 = 申込日
+    serviceStartDate: serviceStart,
+    chargeStartDate: nextChargeDate,
+    name: input.name,
+    phone: input.phone,
+  });
 
   // 利用者への登録完了メール (§②)。件名/本文は管理画面 (/admin/settings) で編集。
   // 弊社アドレス (SMTP_FROM) から利用者のメールへ。カード等の決済個人情報は含めない。
@@ -753,6 +826,19 @@ export async function finalizeMpiOrder(orderId: string): Promise<FinalizeMpiResu
       accountId: contract.account_id, planName,
       name: contract.contact_name ?? "", phone: contract.contact_phone ?? "",
     }).catch(() => {});
+    // ① エントリータブへ記録 + ② プレミアムならライセンスキー付与
+    // (3DS は認証完了=案件確定のこのタイミング。suspended 中は書かない)
+    await recordEntryAndLicense({
+      contractId: contract.id,
+      accountId: contract.account_id,
+      planId: contract.plan_id,
+      planName,
+      contractDate: jstDateOf(contract.started_at) || todayJst(),  // ご契約日 = 申込日
+      serviceStartDate: serviceStart ?? todayJst(),
+      chargeStartDate: contract.next_charge_date ?? "",
+      name: contract.contact_name,
+      phone: contract.contact_phone,
+    });
     if (contract.contact_email) {
       await sendWelcomeEmail(contract.tenant_id, {
         to: contract.contact_email,
@@ -1139,5 +1225,18 @@ export async function cancelSubscription(accountId: string): Promise<{ ok: boole
       lastResult: { vResultCode: vt?.vResultCode ?? null, at: new Date().toISOString() },
     }).catch(() => {});
   }
+
+  // ③ 連携スプレッドシート「解約」タブへ記録 (非ブロッキング)。
+  //    解約日は解約手続き日 (有効期限 effectiveUntil ではなく手続きを行った日)。
+  const serviceStart = (await getServiceStartMap([contract.id]).catch(() => new Map()))
+    .get(contract.id) ?? null;
+  await appendCancelRow({
+    customerId: contract.account_id,
+    contractDate: jstDateOf(contract.started_at),
+    serviceStartDate: serviceStart ?? "",
+    canceledDate: todayJst(),
+    serviceName: contract.plan_name ?? contract.plan_id,
+  }).catch((e) => console.error("[payments] cancel sheet failed:", String(e?.message ?? e)));
+
   return { ok: true, effectiveUntil };
 }
