@@ -19,6 +19,17 @@ export type PaymentSettings = {
   cancelPolicy: "end_of_month" | "immediate"; // 解約: 当月末まで利用可(翌月停止) / 即時停止
   // 利用者への登録完了メール(件名/本文)。プレースホルダ {name}{accountId}{planName}{amount}{serviceStartDate}{chargeStartDate}
   welcomeEmail?: { subject: string; body: string };
+
+  // --- 連携スプレッドシート (①②③) ---
+  /** 申込/解約/ライセンスキーを記録する Google スプレッドシートのID (URLの /d/ と /edit の間) */
+  signupSheetId?: string | null;
+  /** ライセンスキー残数の集計結果 (毎朝9時のCronが更新。表示専用) */
+  licenseStock?: {
+    total: number;      // A列2行目以降のキー総数 (母数)
+    used: number;       // B列に会員IDが入っている数
+    remaining: number;  // total - used
+    checkedAt: string;  // 集計時刻 (ISO)
+  } | null;
 };
 
 const PROVIDER = "payment_settings";
@@ -95,4 +106,13 @@ export async function savePaymentSettings(cfg: PaymentSettings): Promise<{ ok: b
   } catch (e: any) {
     return { ok: false, error: String(e?.message ?? e) };
   }
+}
+
+/** 設定の一部だけを更新する (既存値は保持)。
+ *  Cron のライセンス残数集計など、管理画面の入力を上書きしてはいけない用途に使う。 */
+export async function patchPaymentSettings(
+  partial: Partial<PaymentSettings>,
+): Promise<{ ok: boolean; error?: string }> {
+  const current = await loadPaymentSettings();
+  return savePaymentSettings({ ...(current as PaymentSettings), ...partial });
 }

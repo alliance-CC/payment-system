@@ -3,6 +3,10 @@
     {
       "path": "/api/payments/cron/charge",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/payments/cron/license-stock",
+      "schedule": "0 0 * * *"
     }
   ]
 }

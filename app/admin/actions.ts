@@ -7,7 +7,7 @@ import { hardDeleteContractByAccountId, getContractByAccountId, updateContractRo
 import { loadPlan } from "@/features/payments/plans";
 import { chargeByAccount } from "@/features/payments/veritrans/paynowid";
 import { loadVeritransConfig } from "@/features/payments/veritrans/config";
-import { savePaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
+import { savePaymentSettings, loadPaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const pw = String(formData.get("password") ?? "");
@@ -154,6 +154,10 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
       subject: String(formData.get("welcome_subject") ?? "").trim(),
       body: String(formData.get("welcome_body") ?? "").trim(),
     },
+    // ①②③ 連携スプレッドシート。在庫集計(licenseStock)は Cron が書き込むため
+    // ここでは編集せず既存値を引き継ぐ (管理画面の保存で消さない)。
+    signupSheetId: String(formData.get("signupSheetId") ?? "").trim() || null,
+    licenseStock: (await loadPaymentSettings()).licenseStock ?? null,
   };
   const res = await savePaymentSettings(settings);
   if (res.ok) redirect("/admin/settings?saved=1");

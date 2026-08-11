@@ -106,6 +106,15 @@ vi.mock("./store", () => ({
   },
   insertConsent: async (row: any) => { mem.consents.push(row); },
   updateServiceStartDate: async (_id: string, _date: string | null) => { /* 列 p001 のベストエフォート保存 (テストでは no-op) */ },
+  getServiceStartMap: async (_ids: string[]) => new Map<string, string | null>(),
+  updateLicenseKey: async (_id: string, _key: string | null) => { /* 列 p002 のベストエフォート保存 (テストでは no-op) */ },
+}));
+
+// ①②③ 連携スプレッドシート。未設定時は no-op だが、テストでは外部依存を持たせない
+vi.mock("./entry-sheet", () => ({
+  appendEntryRow: async () => {},
+  appendCancelRow: async () => {},
+  assignLicenseKey: async () => null,
 }));
 
 vi.mock("./crm-adapter", () => ({

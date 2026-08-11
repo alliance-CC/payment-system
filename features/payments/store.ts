@@ -27,6 +27,8 @@ export type ContractRow = {
   free_key: string | null;
   /** 利用開始日 (2ヶ月無料の起点)。列 p001 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
   service_start_date?: string | null;
+  /** ウイルスバスターのライセンスキー。列 p002 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
+  license_key?: string | null;
 };
 
 const CONTRACT_COLS =
@@ -40,6 +42,28 @@ export async function updateServiceStartDate(id: string, date: string | null): P
     const service = createSupabaseService();
     await service.from("payment_contracts").update({ service_start_date: date }).eq("id", id);
   } catch { /* 列が無ければ黙って無視 (管理表示は申込日から推定) */ }
+}
+
+/** ライセンスキーをベストエフォートで保存 (列 p002 未適用でも申込を失敗させない)。 */
+export async function updateLicenseKey(id: string, key: string | null): Promise<void> {
+  try {
+    const service = createSupabaseService();
+    await service.from("payment_contracts").update({ license_key: key }).eq("id", id);
+  } catch { /* 列が無ければ黙って無視 (シート側には付与済みの記録が残る) */ }
+}
+
+/** contract_id → ライセンスキー のマップをベストエフォートで取得 (列 p002 未適用なら空)。 */
+export async function getLicenseKeyMap(ids: string[]): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (!ids.length) return map;
+  try {
+    const service = createSupabaseService();
+    const { data, error } = await service
+      .from("payment_contracts").select("id, license_key").in("id", ids);
+    if (error) return map;
+    for (const r of data ?? []) map.set((r as any).id, (r as any).license_key ?? null);
+  } catch { /* 列が無ければ空マップ */ }
+  return map;
 }
 
 /** contract_id → 利用開始日 のマップをベストエフォートで取得 (列 p001 未適用なら空)。 */
