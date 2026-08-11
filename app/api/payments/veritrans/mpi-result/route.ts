@@ -15,8 +15,12 @@ import { finalizeMpiOrder } from "@/features/payments/billing";
 //    finalizeMpiOrder が MpiGetResult (authHash 署名付きサーバー間照会) で行う。
 //    偽の PUSH が来ても照会結果でしか状態は変わらないため詐称は成立しない。
 //
-// §8: 受け口は安定して応答すること。確定処理 (照会+契約更新+通知メール) は
+// §8: 受け口は安定して応答すること。確定処理 (照会+契約更新+通知メール+シート反映) は
 //     数秒で終わる想定だが、失敗時は 500 を返し VT のリトライ再送に乗せる。
+//     タイムアウトで 200 を返せないと VT が再送し続けるため実行時間に余裕を持たせる。
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+
 export async function POST(req: Request) {
   const raw = await req.text().catch(() => "");
 
