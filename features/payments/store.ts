@@ -213,6 +213,22 @@ export async function hasInDoubtAttempt(contractId: string, chargeMonth: string)
   return (data ?? []).length > 0;
 }
 
+/** 申込 (初回登録) の取引が未確定 (ok=null) のまま残っているか。
+ *  管理ボードが「申込未完了」を判定する条件 (admin-query の pendingInitial) と同じ。
+ *  決済登録が済んでいない申込を連携スプレッドシートへ書かないための入口チェックに使う。 */
+export async function hasUnfinishedInitialCharge(contractId: string): Promise<boolean> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id")
+    .eq("contract_id", contractId)
+    .eq("kind", "initial")
+    .is("ok", null)
+    .limit(1);
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
 /** 対象月の試行回数 (リトライの orderId 採番に使用) */
 export async function countAttempts(contractId: string, chargeMonth: string): Promise<number> {
   const service = createSupabaseService();
@@ -322,15 +338,37 @@ export async function claimChargeFinalization(
   return (data ?? []).length > 0;
 }
 
+/** 3DS 申込の未確定 (ok=null) 取引を取得する (在疑義スイーパー用)。
+ *
+ *  対象を kind="initial" かつ order_id が _3ds を含む行に絞るのが要点:
+ *  日次課金 (recurring/retry) の在疑義は金銭移動を伴い、勝手に失敗確定すると
+ *  別 orderId での再課金 = 二重課金になりうる。自動処理は申込時の本人認証取引だけに
+ *  限定し、金額ありの在疑義は従来どおり手動確定 (resolveInDoubtCharge) に委ねる。 */
+export async function listInDoubt3dsCharges(limit: number): Promise<
+  { id: string; order_id: string; amount: number; v_result_code: string | null }[]
+> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id, order_id, amount, v_result_code")
+    .is("ok", null)
+    .eq("kind", "initial")
+    .like("order_id", "%\\_3ds%")
+    .limit(limit);
+  if (error) throw new Error(`payment_charges in-doubt query failed: ${error.message}`);
+  return (data ?? []) as { id: string; order_id: string; amount: number; v_result_code: string | null }[];
+}
+
 /** 在疑義 (ok=null) の課金試行1件を取得する (手動確定用) */
 export async function getInDoubtCharge(chargeId: string): Promise<
-  | { id: string; tenant_id: string; contract_id: string; order_id: string; charge_month: string; amount: number }
+  | { id: string; tenant_id: string; contract_id: string; order_id: string; charge_month: string;
+      kind: string; amount: number }
   | null
 > {
   const service = createSupabaseService();
   const { data, error } = await service
     .from("payment_charges")
-    .select("id, tenant_id, contract_id, order_id, charge_month, amount, ok")
+    .select("id, tenant_id, contract_id, order_id, charge_month, kind, amount, ok")
     .eq("id", chargeId)
     .maybeSingle();
   if (error) throw new Error(`payment_charges select failed: ${error.message}`);

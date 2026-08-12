@@ -1,5 +1,7 @@
 // 連携スプレッドシート (①②③)。1つのスプレッドシートに3タブを持つ:
-//   "エントリー"    … 申込が保存されたタイミングで1件書き込む (①)
+//   "エントリー"    … 申込が成立した (決済登録が完了し「利用前」になった) 時点で1件書き込む (①)。
+//                     3DS 認証で離脱した等の「申込未完了」は書かない — 課金されない申込を
+//                     成立した申込と同じ行として残さないため。
 //   "ライセンスキー" … A列=ウイルスバスターのライセンスキー / B列=付与先の会員ID (②)
 //   "解約"          … 解約時に1件書き込む (③)
 //
@@ -69,30 +71,46 @@ async function getSheets(overrideId?: string): Promise<{ sheets: any; spreadshee
 }
 
 /**
- * 「顧客IDが入っていない行の上から順に」書き込む (①③ 共通)。
- * append ではなく、A列を読んで最初の空き行を特定して update する。
+ * A列 (顧客ID) の内容から書き込み先の行を決める (①③ 共通)。
  *   ・見出し行(1行目)は対象外
+ *   ・dedupeKey が既にA列にあれば "duplicate" (書かない)
  *   ・途中に空行があればそこを埋める (シート側で行を用意しておける)
  *   ・空きが無ければ最終行の次に追記する
+ * 決済確定のタイミングが複数あり (3DS確定・手動確定・スイープ後の補完)、同じ申込で
+ * 二度呼ばれうるため、重複判定を分離して単体テストできるようにしている。
  */
+export function pickTargetRow(
+  rows: any[][],
+  dedupeKey?: string,
+): { row: number } | "duplicate" {
+  const key = (dedupeKey ?? "").trim();
+  let target = -1;
+  for (let i = 1; i < rows.length; i++) {   // 1行目は見出し
+    const v = String(rows[i]?.[0] ?? "").trim();
+    if (key && v === key) return "duplicate";
+    if (!v && target === -1) target = i + 1;  // シートの行番号は1始まり
+  }
+  // 重複確認のため全行を見てから決める (空き行を見つけても早期returnしない)
+  return { row: target === -1 ? Math.max(rows.length, 1) + 1 : target };
+}
+
+/** 「顧客IDが入っていない行の上から順に」書き込む (①③ 共通)。
+ *  append ではなく、A列を読んで書き込み先の行を特定して update する。
+ *  dedupeKey を渡すと、その値が既にA列にある場合は書かずに "duplicate" を返す。 */
 async function writeToFirstEmptyRow(
   client: { sheets: any; spreadsheetId: string },
   tab: string,
   values: string[],
-): Promise<void> {
+  dedupeKey?: string,
+): Promise<"written" | "duplicate"> {
   const { sheets, spreadsheetId } = client;
   const col = await sheets.spreadsheets.values.get({
     spreadsheetId,
     range: `${tab}!A1:A100000`,
   });
-  const rows: any[][] = col?.data?.values ?? [];
-  // 1行目は見出し。2行目以降でA列が空の最初の行を探す
-  let target = -1;
-  for (let i = 1; i < rows.length; i++) {
-    const v = String(rows[i]?.[0] ?? "").trim();
-    if (!v) { target = i + 1; break; }   // シートの行番号は1始まり
-  }
-  if (target === -1) target = Math.max(rows.length, 1) + 1; // 空きが無ければ最終行の次
+  const picked = pickTargetRow(col?.data?.values ?? [], dedupeKey);
+  if (picked === "duplicate") return "duplicate";
+  const target = picked.row;
 
   const lastCol = String.fromCharCode("A".charCodeAt(0) + values.length - 1);
   await sheets.spreadsheets.values.update({
@@ -101,19 +119,23 @@ async function writeToFirstEmptyRow(
     valueInputOption: "USER_ENTERED",
     requestBody: { values: [values] },
   });
+  return "written";
 }
 
-/** ① 申込をエントリータブへ記録する (非ブロッキング) */
-export async function appendEntryRow(row: EntrySheetRow): Promise<void> {
+/** ① 申込をエントリータブへ記録する (非ブロッキング)。
+ *  同じ顧客IDが既にあれば書かない — 申込の成立は 3DS 確定・在疑義の手動確定・
+ *  スイープ後の補完と複数の経路で起こるため、行が二重にならないようにする。 */
+export async function appendEntryRow(row: EntrySheetRow): Promise<"written" | "duplicate" | "skipped"> {
   try {
     const client = await getSheets();
-    if (!client) return; // 未設定 = 何もしない
-    await writeToFirstEmptyRow(client, ENTRY_TAB, [
+    if (!client) return "skipped"; // 未設定 = 何もしない
+    return await writeToFirstEmptyRow(client, ENTRY_TAB, [
       row.customerId, row.contractDate, row.serviceStartDate, row.chargeStartDate,
       row.lastNameKanji, row.firstNameKanji, row.mobilePhone, row.serviceName,
-    ]);
+    ], row.customerId);
   } catch (e: any) {
     console.error("[entry-sheet] entry write failed:", String(e?.message ?? e));
+    return "skipped";
   }
 }
 

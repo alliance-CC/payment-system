@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runDailyCharges } from "@/features/payments/billing";
+import { runDailyCharges, sweepAbandoned3ds } from "@/features/payments/billing";
 
 // 日次の継続課金実行 (§5-② 確定方式 / §6-5,6)。
 // vercel.json の crons から毎日 01:00 UTC (= 10:00 JST) に起動される。
@@ -23,8 +23,18 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "cron-secret-required-in-production" }, { status: 503 });
   }
 
+  // 課金の前に、放置された 3DS 申込を片付ける (/api/payments/cron/mpi-sweep と同じ処理)。
+  // 専用の cron を持たせず日次課金に相乗りさせているのは Vercel Hobby の制限
+  // (cron は2本まで・日次のみ) のため。Pro なら mpi-sweep を毎時で回すほうが復旧が早い。
+  // スイープ自身が実行時間バジェット (45s) を持ち、課金側の 240s と合わせても
+  // maxDuration=300s に収まる。失敗しても課金は実行する (片付けは翌日に持ち越せる)。
+  const sweep = await sweepAbandoned3ds().catch((e: any) => {
+    console.error("[payments/cron] 3ds sweep failed:", String(e?.message ?? e));
+    return null;
+  });
+
   const summary = await runDailyCharges();
   // 運用ログ (Vercel の Cron 実行ログから確認できる)
-  console.log("[payments/cron]", JSON.stringify(summary));
-  return NextResponse.json(summary);
+  console.log("[payments/cron]", JSON.stringify({ ...summary, sweep }));
+  return NextResponse.json({ ...summary, sweep });
 }

@@ -13,7 +13,7 @@ export type RegistrantRow = {
   chargeStart: string;      // 課金開始日 = 無料期間終了後の初回課金日
   canceledAt: string | null;// 解約日
   paymentMethod: string;    // card / bank
-  statusLabel: "利用前" | "利用中" | "解約";
+  statusLabel: "利用前" | "利用中" | "解約" | "申込未完了";
   rawStatus: string;        // active/delinquent/suspended/canceled/card_expired
   name: string | null;
   phone: string | null;
@@ -27,7 +27,7 @@ export type RegistrantRow = {
 export type Board = {
   month: string;            // 対象月 YYYY-MM
   rows: RegistrantRow[];
-  counts: { total: number; active: number; before: number; canceled: number; alerts: number };
+  counts: { total: number; active: number; before: number; canceled: number; incomplete: number; alerts: number };
 };
 
 // timestamptz(UTC) → JST の日付 (YYYY-MM-DD)
@@ -60,6 +60,20 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
   const { data: consents } = await svc.from("payment_consents").select("account_id");
   const consentSet = new Set((consents ?? []).map((c: any) => c.account_id));
 
+  // 申込が完了していない契約: 初回登録取引 (kind=initial) が未確定 (ok=null) のまま
+  // 残っている = 3DS 認証画面での離脱・結果不明などで決済登録まで到達していない。
+  // 対象月に関係なく判定する (申込月を過ぎても未完了は未完了のため)。
+  const pendingInitial = new Set<string>();
+  if (ids.length) {
+    const { data: pend } = await svc
+      .from("payment_charges")
+      .select("contract_id")
+      .is("ok", null)
+      .eq("kind", "initial")
+      .in("contract_id", ids);
+    for (const p of pend ?? []) pendingInitial.add((p as any).contract_id);
+  }
+
   // 対象月の課金結果 (contract_id 単位に集約)
   const chargesByContract = new Map<string, { ok: boolean | null }[]>();
   if (ids.length) {
@@ -87,9 +101,11 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
       : "";
     const canceledAt = c.canceled_at ? jstDate(c.canceled_at) : null;
 
-    // 状況ラベル
+    // 状況ラベル。「申込未完了」は利用開始日より優先する — 決済登録が済んでいない契約を
+    // 正常な「利用前」と同じ見た目にしてしまうと、課金されないまま見落とされるため。
     let statusLabel: RegistrantRow["statusLabel"];
     if (c.status === "canceled") statusLabel = "解約";
+    else if (pendingInitial.has(c.id)) statusLabel = "申込未完了";
     else if (serviceStart && today < serviceStart) statusLabel = "利用前";
     else statusLabel = "利用中";
 
@@ -111,8 +127,10 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
       else monthBilling = "未課金";                                           // 課金日を過ぎたのに課金記録が無い=要確認
     }
 
+    // 申込未完了は当月課金が「対象外」になる月でも要注意のまま (放置すると課金されない)
     const billingAlert =
       ["delinquent", "suspended", "card_expired"].includes(c.status) ||
+      statusLabel === "申込未完了" ||
       monthBilling === "決済不備" || monthBilling === "確認中" ||
       (monthBilling === "未課金" && c.status !== "canceled");
 
@@ -157,6 +175,7 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
     active: rows.filter((r) => r.statusLabel === "利用中").length,
     before: rows.filter((r) => r.statusLabel === "利用前").length,
     canceled: rows.filter((r) => r.statusLabel === "解約").length,
+    incomplete: rows.filter((r) => r.statusLabel === "申込未完了").length,
     alerts: rows.filter((r) => r.billingAlert).length,
   };
 

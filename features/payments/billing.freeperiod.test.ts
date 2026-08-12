@@ -104,6 +104,10 @@ vi.mock("./store", () => ({
   getInDoubtCharge: async (id: string) => {
     const c = mem.charges.find((x) => x.id === id); return c && c.ok === null ? c : null;
   },
+  // 申込未完了 (初回登録取引が ok=null のまま) の契約は連携シートに書かない
+  hasUnfinishedInitialCharge: async (cid: string) =>
+    mem.charges.some((c) => c.contract_id === cid && c.kind === "initial" && c.ok === null),
+  getLicenseKeyMap: async (_ids: string[]) => new Map<string, string | null>(),
   insertConsent: async (row: any) => { mem.consents.push(row); },
   updateServiceStartDate: async (_id: string, _date: string | null) => { /* 列 p001 のベストエフォート保存 (テストでは no-op) */ },
   getServiceStartMap: async (_ids: string[]) => new Map<string, string | null>(),
