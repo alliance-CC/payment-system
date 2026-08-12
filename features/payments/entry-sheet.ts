@@ -12,6 +12,7 @@
 //       あるため、取得できなければ付与せず null を返す (二重付与を作らない)。
 import "server-only";
 import { loadPaymentSettings } from "./payment-settings";
+import { normalizeGooglePrivateKey, isValidPrivateKey, PRIVATE_KEY_HELP } from "./google-key";
 
 export const ENTRY_TAB = "エントリー";
 export const CANCEL_TAB = "解約";
@@ -56,10 +57,12 @@ async function getSheets(overrideId?: string): Promise<{ sheets: any; spreadshee
   if (!spreadsheetId) return null;
 
   // 動的 import: Sheets 未使用のデプロイで googleapis を読み込まない
+  const key = normalizeGooglePrivateKey(privateKey);
+  if (!isValidPrivateKey(key)) throw new Error(PRIVATE_KEY_HELP);
   const { google } = await import("googleapis");
   const auth = new google.auth.JWT({
     email: clientEmail,
-    key: privateKey.replace(/\\n/g, "\n"),
+    key,
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   });
   return { sheets: google.sheets({ version: "v4", auth }), spreadsheetId };
@@ -209,9 +212,21 @@ export async function testSheetConnection(overrideSheetId?: string): Promise<She
   if (!clientEmail) return { ok: false, error: "GOOGLE_SHEETS_CLIENT_EMAIL が未設定です (Vercelの環境変数)" };
   if (!privateKey) return { ok: false, error: "GOOGLE_SHEETS_PRIVATE_KEY が未設定です (Vercelの環境変数)" };
 
-  const client = await getSheets(overrideSheetId).catch((e: any) => {
-    throw new Error(`認証に失敗しました: ${String(e?.message ?? e)}`);
-  });
+  // 鍵の形が崩れていると OpenSSL の DECODER エラーになる。原因が分かる案内を先に返す
+  if (!isValidPrivateKey(normalizeGooglePrivateKey(privateKey))) {
+    return { ok: false, error: PRIVATE_KEY_HELP };
+  }
+
+  let client: Awaited<ReturnType<typeof getSheets>>;
+  try {
+    client = await getSheets(overrideSheetId);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    return {
+      ok: false,
+      error: /DECODER|unsupported|PEM|1E08010C/i.test(msg) ? PRIVATE_KEY_HELP : `認証に失敗しました: ${msg}`,
+    };
+  }
   if (!client) return { ok: false, error: "スプレッドシートIDが未設定です (この画面で保存してください)" };
 
   const { sheets, spreadsheetId } = client;
@@ -253,7 +268,9 @@ export async function testSheetConnection(overrideSheetId?: string): Promise<She
     };
   } catch (e: any) {
     const msg = String(e?.message ?? e);
-    const hint = /permission|403|forbidden/i.test(msg)
+    const hint = /DECODER|1E08010C/i.test(msg)
+      ? PRIVATE_KEY_HELP
+      : /permission|403|forbidden/i.test(msg)
       ? `シートがサービスアカウントに共有されていません。シートの「共有」に ${clientEmail} を「編集者」で追加してください。`
       : /not found|404/i.test(msg)
       ? "スプレッドシートIDが違うか、シートが存在しません。"

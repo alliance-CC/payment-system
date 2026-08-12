@@ -9,6 +9,7 @@
 //
 // 未設定なら何もしない。失敗しても申込は成功させる (通知系と同じ非ブロッキング方針)。
 import "server-only";
+import { normalizeGooglePrivateKey } from "./google-key";
 
 export type SignupSheetRow = {
   registeredAt: string; // ISO 文字列 (JST 表示に整形して書く)
@@ -41,7 +42,7 @@ export async function appendSignupRow(row: SignupSheetRow): Promise<void> {
     const { google } = await import("googleapis");
     const auth = new google.auth.JWT({
       email: clientEmail,
-      key: privateKey.replace(/\\n/g, "\n"),
+      key: normalizeGooglePrivateKey(privateKey),
       scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     });
     const sheets = google.sheets({ version: "v4", auth });
