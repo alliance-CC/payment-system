@@ -19,7 +19,7 @@ import {
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
   insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey,
-  getChargeByOrderId, claimChargeFinalization, type ContractRow,
+  getChargeByOrderId, claimChargeFinalization, listInDoubt3dsCharges, type ContractRow,
 } from "./store";
 import {
   loadBillingPolicy, DEFAULT_TENANT_ID,
@@ -876,6 +876,78 @@ export async function finalizeMpiOrder(orderId: string): Promise<FinalizeMpiResu
     state: claimed ? "failed" : "already-failed",
     accountId: contract.account_id, vResultCode: resultCode,
   };
+}
+
+// ---- 在疑義スイーパー (放置された 3DS 申込の自動片付け) ----------------------
+//
+// finalizeMpiOrder は「みなし失敗で閉じる」判断 (isMpiWaitExpired → expireAbandoned) を
+// 持っているが、それを呼ぶ経路が PUSH / ブラウザ復帰 / 結果ページ再表示 / 再申込 の
+// 4つしかない。ACS 認証画面で離脱した客はどれも通らないため、課金行が ok=null のまま
+// 永久に残り (管理ボードで「確認中」)、契約も suspended のままで課金対象にならない。
+// = 片付ける道具はあるのに実行する人がいない状態。ここがその実行役。
+//
+// 安全側の線引き:
+//   - 対象は申込時の本人認証取引のみ (listInDoubt3dsCharges が kind/orderId で限定)
+//   - さらに 0円与信 (無料期間の登録取引) に限る。金額ありは finalizeMpiOrder 側でも
+//     期限失効を抑止しているが、ここでも入口で弾いて二重の歯止めにする
+//   - 確定はすべて finalizeMpiOrder 経由 = 必ず MpiGetResult (署名付き照会) の結果に従う。
+//     このスイーパー自身は成否を推測しない
+
+export type MpiSweepSummary = {
+  scanned: number;
+  /** みなし失敗として閉じた (契約 canceled → 再申込を解放) */
+  closed: number;
+  /** 照会したら成功していた (PUSH/復帰が失われた取引の救済。契約を有効化済み) */
+  activated: number;
+  /** まだ確定できない (認証進行中・照会不達)。次回のスイープで再試行 */
+  stillPending: number;
+  /** 金額ありのため自動処理しなかった (手動確定 resolveInDoubtCharge に回す) */
+  skippedPaid: number;
+  errors: string[];
+};
+
+/** 1回のスイープで見る最大件数 */
+const MPI_SWEEP_LIMIT = 200;
+/** 実行時間バジェット (maxDuration=60s の内側で安全に打ち切る)。残りは次回のスイープが拾う */
+const MPI_SWEEP_BUDGET_MS = 45_000;
+
+export async function sweepAbandoned3ds(): Promise<MpiSweepSummary> {
+  const startedAt = Date.now();
+  const summary: MpiSweepSummary = {
+    scanned: 0, closed: 0, activated: 0, stillPending: 0, skippedPaid: 0, errors: [],
+  };
+  const rows = await listInDoubt3dsCharges(MPI_SWEEP_LIMIT);
+
+  for (const row of rows) {
+    if (Date.now() - startedAt > MPI_SWEEP_BUDGET_MS) {
+      summary.errors.push("time-budget-exceeded: 残りは次回のスイープで処理");
+      break;
+    }
+    summary.scanned++;
+
+    // 金銭移動を伴う取引には触れない (運用者の判断に委ねる)
+    if (row.amount > 0) {
+      summary.skippedPaid++;
+      continue;
+    }
+    // 開始直後は認証中の可能性があるので触らない。マーカーが無い行 (認可要求が
+    // 届かなかった等) は経過を測れないため、照会して VT 側の事実を確認する
+    if (row.v_result_code?.startsWith(MPI_WAIT_MARKER) && !isMpiWaitExpired(row.v_result_code)) {
+      summary.stillPending++;
+      continue;
+    }
+
+    try {
+      const fin = await finalizeMpiOrder(row.order_id);
+      if (fin.state === "activated" || fin.state === "already-active") summary.activated++;
+      else if (fin.state === "failed" || fin.state === "already-failed") summary.closed++;
+      else if (fin.state === "pending") summary.stillPending++;
+      else summary.errors.push(`${row.order_id}: ${fin.state}`);
+    } catch (e: any) {
+      summary.errors.push(`${row.order_id}: ${String(e?.message ?? e).slice(0, 200)}`);
+    }
+  }
+  return summary;
 }
 
 // ---- 日次課金 (§5-② / §6-5,6) ---------------------------------------------

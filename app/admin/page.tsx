@@ -19,6 +19,7 @@ const STATUS_TABS = [
   { key: "利用前", label: "利用前" },
   { key: "利用中", label: "利用中" },
   { key: "解約", label: "解約" },
+  { key: "申込未完了", label: "申込未完了" },
   { key: "alert", label: "要注意" },
 ] as const;
 
@@ -35,7 +36,9 @@ function billingBadge(v: RegistrantRow["monthBilling"]) {
 }
 
 function statusBadge(v: RegistrantRow["statusLabel"]) {
-  const map: Record<string, string> = { "利用前": "chip-navy", "利用中": "chip-good", "解約": "chip" };
+  const map: Record<string, string> = {
+    "利用前": "chip-navy", "利用中": "chip-good", "解約": "chip", "申込未完了": "chip-gold",
+  };
   return <span className={`chip ${map[v] ?? "chip"}`}>{v}</span>;
 }
 
@@ -146,6 +149,9 @@ export default async function AdminBoardPage({
             <span className="text-muted">利用中 <b className="text-good">{counts.active}</b></span>
             <span className="text-muted">利用前 <b className="text-navy">{counts.before}</b></span>
             <span className="text-muted">解約 <b className="text-ink">{counts.canceled}</b></span>
+            {counts.incomplete > 0 && (
+              <span className="text-muted">申込未完了 <b className="text-accent">{counts.incomplete}</b></span>
+            )}
             <span className="text-muted flex items-center gap-1">
               <AlertTriangle size={13} className="text-bad" />要注意 <b className="text-bad">{counts.alerts}</b>
             </span>
