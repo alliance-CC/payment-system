@@ -7,7 +7,7 @@ import { hardDeleteContractByAccountId, getContractByAccountId, updateContractRo
 import { loadPlan } from "@/features/payments/plans";
 import { chargeByAccount, deleteAccount } from "@/features/payments/veritrans/paynowid";
 import { loadVeritransConfig } from "@/features/payments/veritrans/config";
-import { savePaymentSettings, loadPaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
+import { savePaymentSettings, loadPaymentSettings, patchPaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
 
 export async function loginAction(formData: FormData): Promise<void> {
   const pw = String(formData.get("password") ?? "");
@@ -175,4 +175,31 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   const res = await savePaymentSettings(settings);
   if (res.ok) redirect("/admin/settings?saved=1");
   redirect(`/admin/settings?saved=0&err=${encodeURIComponent(res.error ?? "unknown")}`);
+}
+
+// 連携スプレッドシートの接続テスト (管理画面の「接続テスト」ボタン)。
+// サービスアカウントで開けるか・必要なタブがあるか・書き込めるか・在庫数 を確認し、
+// 結果をクエリに載せて設定画面へ戻す。ついでに在庫集計を保存する
+// (毎朝9時のCronを待たずに残数が反映される)。
+export async function testSheetAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  // 入力中のIDでテストできるようにフォームの値を優先する (保存前でも試せる)
+  const typedId = String(formData.get("signupSheetId") ?? "").trim();
+  const { testSheetConnection } = await import("@/features/payments/entry-sheet");
+  const r = await testSheetConnection(typedId || undefined).catch((e: any) => ({
+    ok: false, error: String(e?.message ?? e),
+  } as Awaited<ReturnType<typeof testSheetConnection>>));
+
+  if (r.ok && r.stock) {
+    await patchPaymentSettings({
+      licenseStock: { ...r.stock, checkedAt: new Date().toISOString() },
+    }).catch(() => { /* 保存失敗はテスト結果表示に影響させない */ });
+  }
+
+  const q = new URLSearchParams({ test: r.ok ? "1" : "0" });
+  if (r.error) q.set("terr", r.error.slice(0, 300));
+  if (r.title) q.set("ttitle", r.title.slice(0, 100));
+  if (r.tabs?.length) q.set("ttabs", r.tabs.join(",").slice(0, 200));
+  if (r.stock) q.set("tstock", `${r.stock.remaining}/${r.stock.total}`);
+  redirect(`/admin/settings?${q.toString()}`);
 }

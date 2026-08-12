@@ -4,12 +4,18 @@ import { requireAdmin } from "@/features/admin/auth";
 import { loadPlans } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } from "@/features/payments/payment-settings";
-import { saveSettingsAction } from "../actions";
+import { saveSettingsAction, testSheetAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "課金設定 | Memoreal Payments" };
 
-export default async function SettingsPage({ searchParams }: { searchParams: { saved?: string; err?: string } }) {
+export default async function SettingsPage({ searchParams }: {
+  searchParams: {
+    saved?: string; err?: string;
+    // 接続テストの結果 (testSheetAction からのクエリ)
+    test?: string; terr?: string; ttitle?: string; ttabs?: string; tstock?: string;
+  };
+}) {
   requireAdmin();
   const plans = await loadPlans();
   const policy = await loadBillingPolicy();
@@ -140,6 +146,39 @@ export default async function SettingsPage({ searchParams }: { searchParams: { s
                 例: https://docs.google.com/spreadsheets/d/<b>ここがID</b>/edit
               </p>
             </label>
+            {/* 接続テスト: ロボット(サービスアカウント)がシートを読み書きできるか即確認 */}
+            <div className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <div className="label">接続テスト</div>
+                  <p className="text-[10px] text-muted">
+                    共有設定・タブ名・書き込み権限をまとめて確認します（データは残しません）
+                  </p>
+                </div>
+                <button formAction={testSheetAction} formNoValidate className="btn text-xs py-1">
+                  接続テストを実行
+                </button>
+              </div>
+              {searchParams.test === "1" && (
+                <div className="text-[12px] text-good">
+                  ✅ 接続できました{searchParams.ttitle ? `（シート「${searchParams.ttitle}」）` : ""}
+                  {searchParams.tstock ? ` — ライセンスキー残数 ${searchParams.tstock}` : ""}
+                  {searchParams.ttabs ? (
+                    <div className="text-[11px] text-muted mt-0.5">タブ: {searchParams.ttabs}</div>
+                  ) : null}
+                </div>
+              )}
+              {searchParams.test === "0" && (
+                <div className="text-[12px] text-bad">
+                  ❌ 接続できませんでした
+                  {searchParams.terr ? <div className="mt-0.5 break-all">{searchParams.terr}</div> : null}
+                  {searchParams.ttabs ? (
+                    <div className="text-[11px] text-muted mt-0.5">見つかったタブ: {searchParams.ttabs}</div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+
             <div className="rounded-lg border border-border p-3">
               <div className="label mb-1">ライセンスキー残数(ウイルスバスター)</div>
               {stock ? (

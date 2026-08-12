@@ -41,14 +41,18 @@ export type CancelSheetRow = {
 type SheetsClient = Awaited<ReturnType<typeof getSheets>> extends infer T
   ? T extends null ? never : NonNullable<T> : never;
 
-/** Sheets クライアントと対象スプレッドシートID。未設定なら null (＝連携無効) */
-async function getSheets(): Promise<{ sheets: any; spreadsheetId: string } | null> {
+/** Sheets クライアントと対象スプレッドシートID。未設定なら null (＝連携無効)。
+ *  overrideId を渡すと保存済み設定より優先する (管理画面の接続テストで、
+ *  入力中のIDをそのまま試せるようにするため)。 */
+async function getSheets(overrideId?: string): Promise<{ sheets: any; spreadsheetId: string } | null> {
   const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
   const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
   if (!clientEmail || !privateKey) return null;
 
-  const s = await loadPaymentSettings();
-  const spreadsheetId = (s.signupSheetId ?? "").trim() || process.env.PAYMENTS_SIGNUP_SHEET_ID || "";
+  const override = (overrideId ?? "").trim();
+  const s = override ? null : await loadPaymentSettings();
+  const spreadsheetId =
+    override || (s?.signupSheetId ?? "").trim() || process.env.PAYMENTS_SIGNUP_SHEET_ID || "";
   if (!spreadsheetId) return null;
 
   // 動的 import: Sheets 未使用のデプロイで googleapis を読み込まない
@@ -176,6 +180,88 @@ export async function assignLicenseKey(accountId: string): Promise<string | null
   }
 }
 
+export type SheetTestResult = {
+  ok: boolean;
+  /** 失敗理由 (未設定・権限なし・タブ名違い等) */
+  error?: string;
+  /** スプレッドシート名 */
+  title?: string;
+  /** 実在するタブ名 */
+  tabs?: string[];
+  /** 必要な3タブが揃っているか */
+  missingTabs?: string[];
+  /** 書き込み権限を確認できたか */
+  canWrite?: boolean;
+  /** ライセンスキーの在庫 */
+  stock?: LicenseStock;
+};
+
+/**
+ * 連携スプレッドシートの疎通確認 (管理画面の「接続テスト」から呼ぶ)。
+ *   1. サービスアカウントでシートを開けるか (共有されているか)
+ *   2. 必要な3タブが存在するか
+ *   3. 書き込みできるか (未使用セルに書いて即消す。データは残さない)
+ *   4. ライセンスキーの在庫を数える
+ */
+export async function testSheetConnection(overrideSheetId?: string): Promise<SheetTestResult> {
+  const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+  const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+  if (!clientEmail) return { ok: false, error: "GOOGLE_SHEETS_CLIENT_EMAIL が未設定です (Vercelの環境変数)" };
+  if (!privateKey) return { ok: false, error: "GOOGLE_SHEETS_PRIVATE_KEY が未設定です (Vercelの環境変数)" };
+
+  const client = await getSheets(overrideSheetId).catch((e: any) => {
+    throw new Error(`認証に失敗しました: ${String(e?.message ?? e)}`);
+  });
+  if (!client) return { ok: false, error: "スプレッドシートIDが未設定です (この画面で保存してください)" };
+
+  const { sheets, spreadsheetId } = client;
+  try {
+    // 1・2. シートを開いてタブ名を取得 (共有されていなければここで 403)
+    const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "properties.title,sheets.properties.title" });
+    const tabs: string[] = (meta?.data?.sheets ?? []).map((s: any) => s?.properties?.title).filter(Boolean);
+    const missingTabs = [ENTRY_TAB, CANCEL_TAB, LICENSE_TAB].filter((t) => !tabs.includes(t));
+
+    // 3. 書き込み確認: ライセンスキータブの未使用セルに書いて即クリアする
+    let canWrite = false;
+    if (tabs.includes(LICENSE_TAB)) {
+      const probe = `${LICENSE_TAB}!Z1000`;
+      try {
+        await sheets.spreadsheets.values.update({
+          spreadsheetId, range: probe, valueInputOption: "RAW",
+          requestBody: { values: [[`connection-test ${new Date().toISOString()}`]] },
+        });
+        canWrite = true;
+        await sheets.spreadsheets.values.clear({ spreadsheetId, range: probe }).catch(() => {});
+      } catch {
+        canWrite = false;   // 閲覧者権限で共有されている等
+      }
+    }
+
+    // 4. 在庫集計
+    const stock = tabs.includes(LICENSE_TAB) ? await countLicenseStock(overrideSheetId) : null;
+
+    return {
+      ok: missingTabs.length === 0 && canWrite,
+      title: meta?.data?.properties?.title,
+      tabs, missingTabs, canWrite,
+      stock: stock ?? undefined,
+      error: missingTabs.length
+        ? `タブが見つかりません: ${missingTabs.join(" / ")}`
+        : !canWrite
+        ? "書き込み権限がありません (共有を「編集者」にしてください)"
+        : undefined,
+    };
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    const hint = /permission|403|forbidden/i.test(msg)
+      ? `シートがサービスアカウントに共有されていません。シートの「共有」に ${clientEmail} を「編集者」で追加してください。`
+      : /not found|404/i.test(msg)
+      ? "スプレッドシートIDが違うか、シートが存在しません。"
+      : msg;
+    return { ok: false, error: hint };
+  }
+}
+
 export type LicenseStock = { total: number; used: number; remaining: number };
 
 /**
@@ -183,9 +269,9 @@ export type LicenseStock = { total: number; used: number; remaining: number };
  *   母数 = A列2行目以降でキーが入っている行数 (増える可能性あり)
  *   使用 = そのうち B列(会員ID)が入っている行数
  */
-export async function countLicenseStock(): Promise<LicenseStock | null> {
+export async function countLicenseStock(overrideSheetId?: string): Promise<LicenseStock | null> {
   try {
-    const client = await getSheets();
+    const client = await getSheets(overrideSheetId);
     if (!client) return null;
     const res = await client.sheets.spreadsheets.values.get({
       spreadsheetId: client.spreadsheetId,
