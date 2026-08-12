@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { sweepAbandoned3ds } from "@/features/payments/billing";
 
-// 放置された 3DS 申込の定期片付け。
-// vercel.json の crons から毎時 :20 に起動される。
+// 放置された 3DS 申込の片付け。
+//
+// ⚠️ vercel.json には登録していない — Vercel Hobby は cron 2本まで・日次のみで、
+//    既に課金/ライセンス在庫の2本が埋まっているため。実運用では日次課金 Cron
+//    (/api/payments/cron/charge) が実行前に同じ処理を呼ぶ。この口は
+//    「今すぐ片付けたい」ときの手動実行用と、Pro へ上げて毎時 cron を
+//    登録する場合の受け口として残してある (schedule 例: "20 * * * *")。
 //   3DS はブラウザ遷移を挟むため、認証画面 (ACS) で離脱されると結果が返らず、
 //   課金行が ok=null のまま = 管理ボードで「確認中」が永久に残る。これを拾って
 //   VeriTrans へ照会し、確定できるものを確定する (成功なら有効化 / 期限切れなら失敗確定)。

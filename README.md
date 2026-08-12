@@ -32,9 +32,11 @@ LP (別プロジェクト) ──申込ボタン──▶ /subscribe?plan=…
 - `/subscribe` `/subscribe/update-card` — 申込・カード更新 (LPからの着地先)
 - `/legal/terms` `/legal/tokusho` — 利用規約 / 特定商取引法に基づく表記
 - `/api/payments/veritrans/*` — 決済API / `/api/payments/cron/charge` — 日次課金 (10:00 JST)
-- `/api/payments/cron/mpi-sweep` — 放置された3DS申込の片付け (毎時)。認証画面で離脱されると
+- `/api/payments/cron/mpi-sweep` — 放置された3DS申込の片付け。認証画面で離脱されると
   結果が返らず「確認中」が残り続けるため、VeriTrans へ照会して確定させる。対象は申込時の
-  0円与信のみで、金額ありの在疑義には触れない (二重課金を避け手動確定に委ねる)
+  0円与信のみで、金額ありの在疑義には触れない (二重課金を避け手動確定に委ねる)。
+  Vercel Hobby は cron 2本・日次のみのため専用 cron は登録せず、日次課金 Cron が
+  実行前に同じ処理を呼ぶ。この口は手動実行用 (Pro なら毎時 cron に登録すると復旧が早い)
 
 カード番号等の決済個人情報はブラウザ→VeriTrans直送で、本アプリのサーバー・DB・ログ・
 管理画面のいずれにも保持しない。
