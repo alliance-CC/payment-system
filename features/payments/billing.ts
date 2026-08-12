@@ -18,8 +18,9 @@ import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
-  insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey,
-  getChargeByOrderId, claimChargeFinalization, listInDoubt3dsCharges, type ContractRow,
+  insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey, getLicenseKeyMap,
+  getChargeByOrderId, claimChargeFinalization, listInDoubt3dsCharges, hasUnfinishedInitialCharge,
+  type ContractRow,
 } from "./store";
 import {
   loadBillingPolicy, DEFAULT_TENANT_ID,
@@ -95,6 +96,11 @@ export function planIncludesVirusBuster(planId: string, planName?: string | null
 
 // ① 申込をエントリータブへ記録し、② プレミアムならライセンスキーを付与する。
 // いずれもシート連携であり、失敗しても申込は成立させる (非ブロッキング)。
+//
+// 書くのは「申込が成立したもの (管理ボードの 利用前/利用中)」だけ:
+// 3DS 認証で離脱した等で決済登録が終わっていない契約は「申込未完了」であり、課金もされない。
+// これをシートに入れると、成立した申込と見分けが付かないまま利用開始の手配が進んでしまう。
+// 呼び出し側は成功パスからしか呼ばないが、経路が増えても崩れないよう書き込み口で判定する。
 async function recordEntryAndLicense(v: {
   contractId: string;
   accountId: string;
@@ -106,6 +112,10 @@ async function recordEntryAndLicense(v: {
   name: string | null;
   phone: string | null;
 }): Promise<void> {
+  if (!(await isApplicationCompleted(v.contractId))) {
+    console.error("[payments] entry sheet skipped (申込未完了):", v.accountId);
+    return;
+  }
   const { last, first } = splitName(v.name);
   await appendEntryRow({
     customerId: v.accountId,
@@ -120,12 +130,49 @@ async function recordEntryAndLicense(v: {
 
   if (!planIncludesVirusBuster(v.planId, v.planName)) return;   // プラスは付与しない
   try {
+    // 付与済みなら在庫を減らさない (確定経路が複数あるため二度呼ばれうる)
+    const already = (await getLicenseKeyMap([v.contractId]).catch(() => new Map())).get(v.contractId);
+    if (already) return;
     const key = await assignLicenseKey(v.accountId);
     if (key) await updateLicenseKey(v.contractId, key);
     else console.error("[payments] license key not assigned (stock empty or sheet unavailable):", v.accountId);
   } catch (e: any) {
     console.error("[payments] license key assign failed:", String(e?.message ?? e));
   }
+}
+
+/** 申込が成立しているか (= 管理ボードで「申込未完了」でない)。
+ *  初回登録取引が未確定のまま残っている契約・解約済みの契約は連携シートに入れない。
+ *  判定に失敗した場合は書かない側に倒す — 取りこぼしは後続の確定経路
+ *  (手動確定・古い未確定行の片付け) が拾い直せるが、誤って書いた行は消せないため。 */
+async function isApplicationCompleted(contractId: string): Promise<boolean> {
+  try {
+    const contract = await getContractById(contractId);
+    if (!contract || contract.status === "canceled") return false;
+    return !(await hasUnfinishedInitialCharge(contractId));
+  } catch (e: any) {
+    console.error("[payments] entry eligibility check failed:", String(e?.message ?? e));
+    return false;
+  }
+}
+
+/** 契約行から ①② の記録を行う (3DS 確定・在疑義の手動確定・片付け後の補完で共用)。
+ *  申込未完了なら recordEntryAndLicense 側で見送られる。 */
+async function recordEntryFromContract(contract: ContractRow, serviceStart?: string | null): Promise<void> {
+  const ss = serviceStart !== undefined
+    ? serviceStart
+    : (await getServiceStartMap([contract.id]).catch(() => new Map())).get(contract.id) ?? null;
+  await recordEntryAndLicense({
+    contractId: contract.id,
+    accountId: contract.account_id,
+    planId: contract.plan_id,
+    planName: contract.plan_name ?? contract.plan_id,
+    contractDate: jstDateOf(contract.started_at) || todayJst(),   // ご契約日 = 申込日
+    serviceStartDate: ss ?? todayJst(),
+    chargeStartDate: contract.next_charge_date ?? "",
+    name: contract.contact_name,
+    phone: contract.contact_phone,
+  });
 }
 
 // VeriTrans 応答から人間可読なエラー詳細 (どのパラメータが不正か等) を安全に抽出する。
@@ -734,7 +781,9 @@ export async function finalizeMpiOrder(orderId: string): Promise<FinalizeMpiResu
     const claimed = await claimChargeFinalization(charge.id, {
       ok: false, mstatus: "3ds-expired", v_result_code: "3DS-EXPIRED",
     }).catch(() => false);
-    if (claimed) {
+    // 契約を解約に戻すのは「認証待ちのまま (suspended)」の申込だけ。既に成立している契約に
+    // 古い未確定行が残っていた場合、それを閉じたことで生きている契約を解約してはならない
+    if (claimed && contract.status === "suspended") {
       await updateContractRow(contract.id, {
         status: "canceled", next_charge_date: null, last_result_code: "3DS-EXPIRED",
         canceled_at: new Date().toISOString(),
@@ -828,17 +877,7 @@ export async function finalizeMpiOrder(orderId: string): Promise<FinalizeMpiResu
     }).catch(() => {});
     // ① エントリータブへ記録 + ② プレミアムならライセンスキー付与
     // (3DS は認証完了=案件確定のこのタイミング。suspended 中は書かない)
-    await recordEntryAndLicense({
-      contractId: contract.id,
-      accountId: contract.account_id,
-      planId: contract.plan_id,
-      planName,
-      contractDate: jstDateOf(contract.started_at) || todayJst(),  // ご契約日 = 申込日
-      serviceStartDate: serviceStart ?? todayJst(),
-      chargeStartDate: contract.next_charge_date ?? "",
-      name: contract.contact_name,
-      phone: contract.contact_phone,
-    });
+    await recordEntryFromContract(contract, serviceStart);
     if (contract.contact_email) {
       await sendWelcomeEmail(contract.tenant_id, {
         to: contract.contact_email,
@@ -865,8 +904,9 @@ export async function finalizeMpiOrder(orderId: string): Promise<FinalizeMpiResu
   const claimed = await claimChargeFinalization(charge.id, {
     ok: false, mstatus: q.mpiMstatus ?? q.mstatus, v_result_code: resultCode,
   }).catch(() => false);
-  if (claimed) {
-    // 契約は作られたが決済に至らなかった — canceled に戻して再申込を可能にする
+  if (claimed && contract.status === "suspended") {
+    // 契約は作られたが決済に至らなかった — canceled に戻して再申込を可能にする。
+    // 認証待ち (suspended) の契約に限る: 別試行で既に成立している契約は解約しない
     await updateContractRow(contract.id, {
       status: "canceled", next_charge_date: null, last_result_code: resultCode,
       canceled_at: new Date().toISOString(),
@@ -940,7 +980,13 @@ export async function sweepAbandoned3ds(): Promise<MpiSweepSummary> {
     try {
       const fin = await finalizeMpiOrder(row.order_id);
       if (fin.state === "activated" || fin.state === "already-active") summary.activated++;
-      else if (fin.state === "failed" || fin.state === "already-failed") summary.closed++;
+      else if (fin.state === "failed" || fin.state === "already-failed") {
+        summary.closed++;
+        // 稀に「別の試行で申込は成立済みなのに、古い未確定行だけが残っていた」ことがある。
+        // その行を閉じた今は申込未完了ではなくなる → 見送っていたエントリー行を補う
+        await backfillEntryAfterClose(row.order_id).catch((e: any) =>
+          summary.errors.push(`${row.order_id}: entry backfill ${String(e?.message ?? e).slice(0, 120)}`));
+      }
       else if (fin.state === "pending") summary.stillPending++;
       else summary.errors.push(`${row.order_id}: ${fin.state}`);
     } catch (e: any) {
@@ -948,6 +994,17 @@ export async function sweepAbandoned3ds(): Promise<MpiSweepSummary> {
     }
   }
   return summary;
+}
+
+/** 未確定行を閉じた直後の補完。契約が生きている (=別試行で申込は成立していた) 場合だけ
+ *  ①② を記録する。既に書かれていれば appendEntryRow の重複ガードが弾く。 */
+async function backfillEntryAfterClose(orderId: string): Promise<void> {
+  const charge = await getChargeByOrderId(orderId);
+  if (!charge) return;
+  const contract = await getContractById(charge.contract_id);
+  // canceled = 申込は不成立 / suspended = まだ決済登録が終わっていない → どちらも書かない
+  if (!contract || contract.status === "canceled" || contract.status === "suspended") return;
+  await recordEntryFromContract(contract);
 }
 
 // ---- 日次課金 (§5-② / §6-5,6) ---------------------------------------------
@@ -1231,6 +1288,16 @@ export async function resolveInDoubtCharge(
         status: "active", nextChargeDate: next, orderId: charge.order_id,
         lastResult: { vResultCode: "MANUAL", at: now },
       }).catch(() => {});
+    }
+    // 申込 (初回登録) の在疑義をここで成功確定した = この時点で申込が成立し「利用前」になる。
+    // 未完了のあいだ見送っていた ①エントリー行 / ②ライセンスキーを改めて記録する
+    // (既に書かれていれば重複ガードで書かない)。
+    if (charge.kind === "initial") {
+      const fresh = await getContractById(contract.id).catch(() => null);
+      if (fresh) {
+        await recordEntryFromContract(fresh).catch((e: any) =>
+          console.error("[payments] entry sheet after manual resolve failed:", String(e?.message ?? e)));
+      }
     }
   }
   return { ok: true };

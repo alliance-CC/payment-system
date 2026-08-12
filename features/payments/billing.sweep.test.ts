@@ -57,6 +57,9 @@ vi.mock("./store", () => ({
   },
   getServiceStartMap: async (_ids: string[]) => new Map<string, string | null>(),
   updateLicenseKey: async () => {},
+  hasUnfinishedInitialCharge: async (cid: string) =>
+    mem.charges.some((c) => c.contract_id === cid && c.kind === "initial" && c.ok === null),
+  getLicenseKeyMap: async (_ids: string[]) => new Map<string, string | null>(),
   // 以降は成功パスの後処理で参照されるだけ (このテストでは未使用)
   insertContract: async () => ({}), getContractByAccountId: async () => null,
   listDueContracts: async () => [], hasSuccessfulCharge: async () => false,

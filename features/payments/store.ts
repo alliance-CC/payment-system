@@ -213,6 +213,22 @@ export async function hasInDoubtAttempt(contractId: string, chargeMonth: string)
   return (data ?? []).length > 0;
 }
 
+/** 申込 (初回登録) の取引が未確定 (ok=null) のまま残っているか。
+ *  管理ボードが「申込未完了」を判定する条件 (admin-query の pendingInitial) と同じ。
+ *  決済登録が済んでいない申込を連携スプレッドシートへ書かないための入口チェックに使う。 */
+export async function hasUnfinishedInitialCharge(contractId: string): Promise<boolean> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id")
+    .eq("contract_id", contractId)
+    .eq("kind", "initial")
+    .is("ok", null)
+    .limit(1);
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
 /** 対象月の試行回数 (リトライの orderId 採番に使用) */
 export async function countAttempts(contractId: string, chargeMonth: string): Promise<number> {
   const service = createSupabaseService();
@@ -345,13 +361,14 @@ export async function listInDoubt3dsCharges(limit: number): Promise<
 
 /** 在疑義 (ok=null) の課金試行1件を取得する (手動確定用) */
 export async function getInDoubtCharge(chargeId: string): Promise<
-  | { id: string; tenant_id: string; contract_id: string; order_id: string; charge_month: string; amount: number }
+  | { id: string; tenant_id: string; contract_id: string; order_id: string; charge_month: string;
+      kind: string; amount: number }
   | null
 > {
   const service = createSupabaseService();
   const { data, error } = await service
     .from("payment_charges")
-    .select("id, tenant_id, contract_id, order_id, charge_month, amount, ok")
+    .select("id, tenant_id, contract_id, order_id, charge_month, kind, amount, ok")
     .eq("id", chargeId)
     .maybeSingle();
   if (error) throw new Error(`payment_charges select failed: ${error.message}`);
