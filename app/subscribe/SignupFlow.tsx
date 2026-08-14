@@ -31,6 +31,7 @@ function isEmail(s: string): boolean {
 
 export default function SignupFlow({
   plans, tokenApiKey, tokenUrl, configured, termsVersion, caseId, tenantSlug, initialPlanId, use3ds,
+  altHref, termsSlug,
 }: {
   plans: Plan[];
   tokenApiKey: string;
@@ -43,6 +44,10 @@ export default function SignupFlow({
   initialPlanId?: string;
   /** 3Dセキュア2.0 (VT_USE_3DS)。有効時はカード名義を収集し、申込後に認証画面へ遷移する */
   use3ds?: boolean;
+  /** 「まもるんをご不要な方はこちら」の遷移先 (まもるん有りを見ているときのみ) */
+  altHref?: string | null;
+  /** プランID→利用規約スラッグ (A/B は同じ規約を参照する) */
+  termsSlug?: Record<string, string>;
 }) {
   const planLocked = !!(initialPlanId && plans.some((p) => p.id === initialPlanId));
   // プラン確定時は「お客様情報 → お支払い」の2ステップ、未確定時は先頭に「プラン」。
@@ -178,7 +183,9 @@ export default function SignupFlow({
   const isLast = idx === steps.length - 1;
   // 規約は「新しいタブ」で開く。申込フォームは元のタブにそのまま残り、
   // 規約タブを閉じれば入力内容を保ったまま戻れる (window.openで開くとタブ側で閉じられる)。
-  const termsHref = `/legal/terms/${planId}?from=subscribe`;
+  // A/B は同じ規約を参照する (termsSlug 未指定なら planId をそのまま使う)
+  const slug = termsSlug?.[planId] ?? planId;
+  const termsHref = `/legal/terms/${slug}?from=subscribe`;
   const openTerms = (e: React.MouseEvent) => { e.preventDefault(); window.open(termsHref, "_blank"); };
   // 両プランに含まれる「ネットライフサポート」規約
   const netlifeHref = `/legal/terms/netlife?from=subscribe`;
@@ -274,7 +281,7 @@ export default function SignupFlow({
                  className="flex items-center gap-1 text-[13px] text-accent underline font-medium">
                 「ネットライフサポート」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
               </a>
-              {planId === "premium" && (
+              {slug === "premium" && (
                 <a href={vbHref} target="_blank" rel="noopener" onClick={openVb}
                    className="flex items-center gap-1 text-[13px] text-accent underline font-medium">
                   「ウイルスバスター」の利用規約を確認する（別タブで開きます）<ExternalLink size={12} />
@@ -394,6 +401,15 @@ export default function SignupFlow({
         <p className="text-[11px] text-muted flex items-center gap-1 justify-center">
           <Lock size={11} />カード情報は当社サーバーを経由せず決済代行会社へ直接送信されます
         </p>
+
+        {/* まもるん無しプランへの導線。プラン確定時(お客様情報)は「次へ」の直下に置く */}
+        {altHref && planLocked && cur === "info" && (
+          <p className="text-center">
+            <a href={altHref} className="text-[12px] text-muted underline hover:text-ink">
+              まもるんをご不要な方はこちら
+            </a>
+          </p>
+        )}
       </form>
 
       {/* 特定商取引法に基づく表記 (申込フォーム外・念のため) */}
@@ -402,6 +418,15 @@ export default function SignupFlow({
           特定商取引法に基づく表記
         </a>
       </p>
+
+      {/* プラン選択から来た場合は特商法リンクの下に置く */}
+      {altHref && !planLocked && cur === "plan" && (
+        <p className="text-center mt-2">
+          <a href={altHref} className="text-[12px] text-muted underline hover:text-ink">
+            まもるんをご不要な方はこちら
+          </a>
+        </p>
+      )}
     </>
   );
 }
