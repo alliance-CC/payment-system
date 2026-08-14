@@ -4,7 +4,7 @@ import { requireAdmin } from "@/features/admin/auth";
 import { loadPlans } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } from "@/features/payments/payment-settings";
-import { saveSettingsAction, testSheetAction } from "../actions";
+import { saveSettingsAction, testSheetAction, testMailAction } from "../actions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "課金設定 | Memoreal Payments" };
@@ -14,6 +14,8 @@ export default async function SettingsPage({ searchParams }: {
     saved?: string; err?: string;
     // 接続テストの結果 (testSheetAction からのクエリ)
     test?: string; terr?: string; ttitle?: string; ttabs?: string; tstock?: string;
+    // メールのテスト送信結果 (testMailAction からのクエリ)
+    mail?: string; merr?: string; mto?: string; mvia?: string;
   };
 }) {
   requireAdmin();
@@ -118,7 +120,23 @@ export default async function SettingsPage({ searchParams }: {
             <label className="block">
               <div className="label mb-1">申込通知先メール</div>
               <input name="notifyEmail" type="email" defaultValue={policy.notifyEmail ?? ""} placeholder="alliance@lifeap.co" className="input" />
-              <p className="text-[10px] text-muted mt-1">送信には SMTP 設定が必要</p>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <button formAction={testMailAction} formNoValidate className="btn text-xs py-0.5">
+                  テスト送信
+                </button>
+                <span className="text-[10px] text-muted">実際に1通送って設定を確認します</span>
+              </div>
+              {searchParams.mail === "1" && (
+                <p className="text-[11px] text-good mt-1">
+                  ✅ 送信しました（宛先: {searchParams.mto}）。届いていれば申込通知・登録完了メールも送れます。
+                  {searchParams.mvia ? <span className="block text-muted">経路: {searchParams.mvia}</span> : null}
+                </p>
+              )}
+              {searchParams.mail === "0" && (
+                <p className="text-[11px] text-bad mt-1 break-all">
+                  ❌ 送信できませんでした{searchParams.merr ? `: ${searchParams.merr}` : ""}
+                </p>
+              )}
             </label>
             <label className="block">
               <div className="label mb-1">規約バージョン</div>
