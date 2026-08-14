@@ -203,3 +203,46 @@ export async function testSheetAction(formData: FormData): Promise<void> {
   if (r.stock) q.set("tstock", `${r.stock.remaining}/${r.stock.total}`);
   redirect(`/admin/settings?${q.toString()}`);
 }
+
+// メール送信のテスト (管理画面の「テスト送信」ボタン)。
+// 設定経路 (Resend / SMTP / 未設定) を判定したうえで実際に1通送る。
+// ⚠️ SMTP 未設定時は送信処理が「デモモード」で ok を返すため、必ず先に経路判定する。
+export async function testMailAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  // 入力中の通知先を優先 (保存前でも試せる)。未入力なら保存済みの値
+  const typed = String(formData.get("notifyEmail") ?? "").trim();
+  const to = typed || (await loadPaymentSettings()).notifyEmail || "";
+  const q = new URLSearchParams();
+
+  if (!to.includes("@")) {
+    q.set("mail", "0");
+    q.set("merr", "送信先メールアドレスが未設定です（申込通知先メールを入力してください）");
+    redirect(`/admin/settings?${q.toString()}`);
+  }
+
+  const { describeMailTransport, sendMail } = await import("@/features/messages/mail");
+  const transport = await describeMailTransport().catch(() => null);
+  if (!transport || transport.kind === "none") {
+    q.set("mail", "0");
+    q.set("merr", transport?.detail ?? "メール設定を確認できませんでした");
+    redirect(`/admin/settings?${q.toString()}`);
+  }
+
+  const res = await sendMail({
+    to,
+    subject: "【テスト送信】決済システムのメール設定確認",
+    body: [
+      "このメールは、決済システムの管理画面から送信されたテストメールです。",
+      "本メールが届いていれば、申込通知メール・登録完了メールも送信できます。",
+      "",
+      `送信経路: ${transport!.detail}`,
+      `送信日時: ${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}`,
+    ].join("\n"),
+  }).catch((e: any) => ({ ok: false, error: String(e?.message ?? e) }));
+
+  q.set("mail", res.ok ? "1" : "0");
+  q.set("mto", to);
+  q.set("mvia", transport!.detail);
+  if (!res.ok && res.error) q.set("merr", res.error.slice(0, 300));
+  redirect(`/admin/settings?${q.toString()}`);
+}

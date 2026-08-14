@@ -28,3 +28,28 @@ export async function sendMail(
   // フォールバック: SMTP
   return sendEmailViaSmtp(msg, tenantId);
 }
+
+/** どの経路で送信されるか。
+ *  ⚠️ sendEmailViaSmtp は SMTP 未設定時に「デモモード」として ok:true を返すため、
+ *     送信結果だけでは設定漏れを検知できない。設定判定は必ずこの関数で行うこと。 */
+export type MailTransport = { kind: "resend" | "smtp" | "none"; from?: string; detail: string };
+
+export async function describeMailTransport(tenantId?: string | null): Promise<MailTransport> {
+  const key = process.env.RESEND_API_KEY;
+  const from = process.env.RESEND_FROM || process.env.SMTP_FROM;
+  if (key && from) return { kind: "resend", from, detail: `Resend（差出人: ${from}）` };
+  if (key && !from) {
+    return { kind: "none", detail: "RESEND_API_KEY はありますが、差出人 RESEND_FROM が未設定です" };
+  }
+
+  const { getIntegration } = await import("@/features/integrations/service");
+  const integ = await getIntegration("smtp", { tenantId }).catch(() => null);
+  const host = integ?.config.host as string | undefined;
+  const smtpFrom = integ?.config.from as string | undefined;
+  if (host && smtpFrom) return { kind: "smtp", from: smtpFrom, detail: `SMTP ${host}（差出人: ${smtpFrom}）` };
+
+  return {
+    kind: "none",
+    detail: "メール送信が未設定です。RESEND_API_KEY と RESEND_FROM を設定するか、SMTP_HOST / SMTP_FROM を設定してください",
+  };
+}
