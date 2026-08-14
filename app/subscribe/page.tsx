@@ -1,5 +1,5 @@
 import { loadVeritransConfig, toPublicConfig } from "@/features/payments/veritrans/config";
-import { loadPlans } from "@/features/payments/plans";
+import { loadPlans, customerPlanName } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { resolveTenantIdBySlug } from "@/features/payments/tenant";
 import SignupFlow from "./SignupFlow";
@@ -14,15 +14,36 @@ export const metadata = { title: "お申し込み" };
 export default async function SubscribePage({
   searchParams,
 }: {
-  searchParams: { case?: string; tenant?: string; plan?: string };
+  searchParams: { case?: string; tenant?: string; plan?: string; v?: string };
 }) {
   const tenantId = await resolveTenantIdBySlug(searchParams.tenant);
   const cfg = await loadVeritransConfig(tenantId);   // OEM: テナント別の token_api_key (§1.2)
   const pub = toPublicConfig(cfg);
-  const plans = (await loadPlans()).map((p) => ({ id: p.id, name: p.name, amount: p.amount }));
+  const all = await loadPlans();
   const policy = await loadBillingPolicy();
-  // LP でプランを選んで来た場合は見出しを「お手続き」に (プラン選択を促す文言を出さない)
-  const planPreselected = !!(searchParams.plan && plans.some((p) => p.id === searchParams.plan));
+
+  // まもるん有無の出し分け (顧客には A/B の別を見せない):
+  //   ?plan=<id>  … そのプランに固定 (LP のプラン別ボタン)
+  //   ?v=a        … まもるん無し(A)のみ表示。「まもるんをご不要な方はこちら」の遷移先
+  //   既定        … まもるん有り(B)のみ表示
+  const wantA = searchParams.v === "a";
+  const selected = searchParams.plan ? all.find((p) => p.id === searchParams.plan) : undefined;
+  const visible = selected
+    ? [selected]
+    : all.filter((p) => (p.variant ?? "B") === (wantA ? "A" : "B"));
+
+  // 表示名は displayName (社内表記の A/B は渡さない)
+  const plans = visible.map((p) => ({ id: p.id, name: customerPlanName(p), amount: p.amount }));
+  const planPreselected = !!selected;
+
+  // まもるん無しへの導線 (まもるん有りを見ているときだけ出す)
+  const keep = new URLSearchParams();
+  if (searchParams.case) keep.set("case", searchParams.case);
+  if (searchParams.tenant) keep.set("tenant", searchParams.tenant);
+  const keepQs = keep.toString() ? `&${keep.toString()}` : "";
+  const altHref = selected
+    ? (selected.withoutMamoruPlanId ? `/subscribe?plan=${selected.withoutMamoruPlanId}${keepQs}` : null)
+    : (!wantA ? `/subscribe?v=a${keepQs}` : null);
 
   return (
     <main className="min-h-screen bg-bg flex items-center justify-center p-6">
@@ -47,6 +68,8 @@ export default async function SubscribePage({
           tenantSlug={searchParams.tenant}
           initialPlanId={searchParams.plan}
           use3ds={policy.use3ds}
+          altHref={altHref}
+          termsSlug={Object.fromEntries(all.map((p) => [p.id, p.termsSlug ?? p.id]))}
         />
       </div>
     </main>
