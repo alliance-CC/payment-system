@@ -174,6 +174,12 @@ export default async function AdminBoardPage({
             <button formAction="/admin/export/cancel" className="btn text-xs py-1 flex items-center gap-1">
               <Download size={12} />解約
             </button>
+            <label className="flex items-center gap-1 text-[11px] text-muted pb-1.5 cursor-pointer">
+              {/* 未チェックでも値を送るための hidden。ルート側は "1" の有無で判定する */}
+              <input type="checkbox" name="header" value="1" defaultChecked />
+              <input type="hidden" name="header" value="0" />
+              見出し行を含める
+            </label>
             <span className="text-[11px] text-muted pb-1.5">
               エントリー=申込日 / 解約=解約日 で抽出
             </span>
