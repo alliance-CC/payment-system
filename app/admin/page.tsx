@@ -180,6 +180,12 @@ export default async function AdminBoardPage({
               <input type="hidden" name="header" value="0" />
               見出し行を含める
             </label>
+            <label className="flex items-center gap-1 text-[11px] text-muted pb-1.5 cursor-pointer"
+                   title="Excelで開くと電話番号の先頭0が消えるため、文字列として保持します。先方システムへ取り込むファイルでは外してください">
+              <input type="checkbox" name="excel" value="1" />
+              <input type="hidden" name="excel" value="0" />
+              Excelで開く用（電話番号の先頭0を保持）
+            </label>
             <span className="text-[11px] text-muted pb-1.5">
               エントリー=申込日 / 解約=解約日 で抽出
             </span>

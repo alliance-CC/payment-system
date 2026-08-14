@@ -53,6 +53,11 @@ export async function GET(req: Request) {
   const headerParams = url.searchParams.getAll("header");
   const withHeader = headerParams.length === 0 ? true : headerParams.includes("1");
 
+  // 電話番号の先頭0の扱い。既定は「そのまま」= 先方システムへの取り込み用の生データ。
+  //   excel=1 … Excel で目視する用。="09012345678" 形式にして 0 が消えないようにする
+  //             (この記号ごと取り込むシステムには渡さないこと)
+  const forExcel = url.searchParams.getAll("excel").includes("1");
+
   const rows = await loadEntryExport(from, to);
 
   const lines = withHeader ? [HEADER.map(csvCell).join(",")] : [];
@@ -65,8 +70,8 @@ export async function GET(req: Request) {
     cols[13] = r.lastNameKanji;    // N 契約者名_姓_漢字
     cols[14] = r.firstNameKanji;   // O 契約者名_名_漢字
     cols[21] = r.mobilePhone;      // V 電話番号_携帯
-    // 電話番号は Excel が数値と解釈して先頭の 0 を落とすため文字列として保持する
-    lines.push(cols.map((v, i) => (i === 21 ? csvKeepLeadingZero(v) : csvCell(v))).join(","));
+    // 電話番号は Excel が数値と解釈して先頭の 0 を落とすため、Excel用のときだけ文字列化する
+    lines.push(cols.map((v, i) => (forExcel && i === 21 ? csvKeepLeadingZero(v) : csvCell(v))).join(","));
   }
 
   // Excel の「CSV (コンマ区切り)」として開けるよう Shift_JIS / CRLF で出力する
