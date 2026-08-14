@@ -31,7 +31,7 @@ function isEmail(s: string): boolean {
 
 export default function SignupFlow({
   plans, tokenApiKey, tokenUrl, configured, termsVersion, caseId, tenantSlug, initialPlanId, use3ds,
-  altHref, termsSlug,
+  altHref, altOf, termsSlug,
 }: {
   plans: Plan[];
   tokenApiKey: string;
@@ -44,8 +44,11 @@ export default function SignupFlow({
   initialPlanId?: string;
   /** 3Dセキュア2.0 (VT_USE_3DS)。有効時はカード名義を収集し、申込後に認証画面へ遷移する */
   use3ds?: boolean;
-  /** 「まもるんをご不要な方はこちら」の遷移先 (まもるん有りを見ているときのみ) */
+  /** 「まもるんをご不要な方はこちら」の遷移先 (プラン選択画面から。入力前なので遷移可) */
   altHref?: string | null;
+  /** プランID → まもるん無し版のプランID。プラン確定画面ではページ遷移せず
+   *  その場で切り替える (遷移すると入力済みの氏名・電話・メールが失われるため) */
+  altOf?: Record<string, string>;
   /** プランID→利用規約スラッグ (A/B は同じ規約を参照する) */
   termsSlug?: Record<string, string>;
 }) {
@@ -56,6 +59,8 @@ export default function SignupFlow({
   const cur = steps[idx];
 
   const [planId, setPlanId] = useState(planLocked ? initialPlanId! : (plans[0]?.id ?? ""));
+  // 「まもるんをご不要な方はこちら」で切り替えた元のプラン (押し間違えても戻せるように)
+  const [switchedFrom, setSwitchedFrom] = useState<string | null>(null);
   const [agreed, setAgreed] = useState(false);
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -403,11 +408,26 @@ export default function SignupFlow({
         </p>
 
         {/* まもるん無しプランへの導線。プラン確定時(お客様情報)は「次へ」の直下に置く */}
-        {altHref && planLocked && cur === "info" && (
+        {planLocked && cur === "info" && switchedFrom && !altOf?.[planId] && (
           <p className="text-center">
-            <a href={altHref} className="text-[12px] text-muted underline hover:text-ink">
+            <button
+              type="button"
+              onClick={() => { setPlanId(switchedFrom); setSwitchedFrom(null); }}
+              className="text-[12px] text-muted underline hover:text-ink"
+            >
+              まもるんを含むプランに戻す
+            </button>
+          </p>
+        )}
+        {planLocked && cur === "info" && altOf?.[planId] && (
+          <p className="text-center">
+            <button
+              type="button"
+              onClick={() => { setSwitchedFrom(planId); setPlanId(altOf[planId]); }}
+              className="text-[12px] text-muted underline hover:text-ink"
+            >
               まもるんをご不要な方はこちら
-            </a>
+            </button>
           </p>
         )}
       </form>

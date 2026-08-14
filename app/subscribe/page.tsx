@@ -28,8 +28,14 @@ export default async function SubscribePage({
   //   既定        … まもるん有り(B)のみ表示
   const wantA = searchParams.v === "a";
   const selected = searchParams.plan ? all.find((p) => p.id === searchParams.plan) : undefined;
+  // プラン確定時は、まもるん無し版も一緒に渡す。
+  // 「まもるんをご不要な方はこちら」でページ遷移せず、その場で切り替えられるようにするため
+  // (遷移すると入力済みの氏名・電話・メールが失われる)。
+  const altOfSelected = selected?.withoutMamoruPlanId
+    ? all.find((p) => p.id === selected.withoutMamoruPlanId)
+    : undefined;
   const visible = selected
-    ? [selected]
+    ? [selected, ...(altOfSelected ? [altOfSelected] : [])]
     : all.filter((p) => (p.variant ?? "B") === (wantA ? "A" : "B"));
 
   // 表示名は displayName (社内表記の A/B は渡さない)
@@ -41,9 +47,12 @@ export default async function SubscribePage({
   if (searchParams.case) keep.set("case", searchParams.case);
   if (searchParams.tenant) keep.set("tenant", searchParams.tenant);
   const keepQs = keep.toString() ? `&${keep.toString()}` : "";
-  const altHref = selected
-    ? (selected.withoutMamoruPlanId ? `/subscribe?plan=${selected.withoutMamoruPlanId}${keepQs}` : null)
-    : (!wantA ? `/subscribe?v=a${keepQs}` : null);
+  // プラン選択画面からの導線はページ遷移 (入力前なので失うものが無い)
+  const altHref = !selected && !wantA ? `/subscribe?v=a${keepQs}` : null;
+  // プラン確定画面はその場で切り替える (planId → まもるん無し版のID)
+  const altOf = Object.fromEntries(
+    all.filter((p) => p.withoutMamoruPlanId).map((p) => [p.id, p.withoutMamoruPlanId!]),
+  );
 
   return (
     <main className="min-h-screen bg-bg flex items-center justify-center p-6">
@@ -69,6 +78,7 @@ export default async function SubscribePage({
           initialPlanId={searchParams.plan}
           use3ds={policy.use3ds}
           altHref={altHref}
+          altOf={altOf}
           termsSlug={Object.fromEntries(all.map((p) => [p.id, p.termsSlug ?? p.id]))}
         />
       </div>
