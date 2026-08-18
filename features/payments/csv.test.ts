@@ -1,7 +1,7 @@
 // CSV 出力の整形テスト。先方へ渡すファイルのため Excel での見え方を固定する。
 import { describe, it, expect } from "vitest";
 import iconv from "iconv-lite";
-import { csvCell, csvKeepLeadingZero, toExcelCsv } from "./csv";
+import { csvCell, toExcelCsv } from "./csv";
 
 async function decode(blob: Blob): Promise<string> {
   const buf = Buffer.from(await blob.arrayBuffer());
@@ -18,28 +18,6 @@ describe("CSVのセル整形", () => {
   it("通常の値はそのまま", () => {
     expect(csvCell("暮らし安心プラス")).toBe("暮らし安心プラス");
     expect(csvCell(null)).toBe("");
-  });
-});
-
-describe("先頭0の保持 (Excelが電話番号の0を落とす対策)", () => {
-  it("0始まりの数字列は文字列として保持する", () => {
-    expect(csvKeepLeadingZero("09012345678")).toBe('="09012345678"');
-    expect(csvKeepLeadingZero("0312345678")).toBe('="0312345678"');
-  });
-
-  it("0始まりでない値は変換しない", () => {
-    expect(csvKeepLeadingZero("9012345678")).toBe("9012345678");
-    expect(csvKeepLeadingZero("MRfb4f53ccccb")).toBe("MRfb4f53ccccb");
-    expect(csvKeepLeadingZero("TXEF-0084-0658")).toBe("TXEF-0084-0658");
-  });
-
-  it("数字以外を含む場合は変換しない (ハイフン付き電話番号など)", () => {
-    expect(csvKeepLeadingZero("090-1234-5678")).toBe("090-1234-5678");
-  });
-
-  it("空値は空のまま", () => {
-    expect(csvKeepLeadingZero("")).toBe("");
-    expect(csvKeepLeadingZero(null)).toBe("");
   });
 });
 

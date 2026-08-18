@@ -3,8 +3,8 @@
 // ・文字コード: Shift_JIS(CP932)。Excel の「CSV (コンマ区切り)」がこれで、
 //   BOM 付き UTF-8 だと「CSV UTF-8 (コンマ区切り)」として扱われてしまうため。
 // ・改行: CRLF (Excel/Windows 標準)
-// ・先頭0の保持: 電話番号などは Excel が数値と解釈して先頭の 0 を落とすため、
-//   ="09012345678" 形式にして文字列として開かせる。
+// ・電話番号は phone.ts でハイフン付きに揃えているため、Excel が数値と解釈せず
+//   先頭の 0 も落ちない (="..." のような小細工は不要)。
 import "server-only";
 import iconv from "iconv-lite";
 
@@ -12,17 +12,6 @@ import iconv from "iconv-lite";
 export function csvCell(s: unknown): string {
   const v = String(s ?? "");
   return /[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-}
-
-/**
- * Excel が先頭の 0 を落とす値 (全桁が数字で 0 始まり) を文字列として保持させる。
- * 例: 09012345678 → ="09012345678"
- * 該当しない値はそのまま返す (顧客ID・ライセンスキー等は変換不要)。
- */
-export function csvKeepLeadingZero(s: unknown): string {
-  const v = String(s ?? "");
-  if (!/^0\d+$/.test(v)) return csvCell(v);
-  return `="${v}"`;
 }
 
 /**

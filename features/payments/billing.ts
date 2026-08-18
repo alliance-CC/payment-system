@@ -14,6 +14,7 @@ import { newAccountId, accountIdFromCaseId, isValidAccountId } from "./account";
 import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
 import { appendSignupRow } from "./signup-sheet";
 import { appendEntryRow, appendCancelRow, assignLicenseKey } from "./entry-sheet";
+import { formatPhoneJp } from "./phone";
 import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
@@ -124,7 +125,7 @@ async function recordEntryAndLicense(v: {
     chargeStartDate: v.chargeStartDate,
     lastNameKanji: last,
     firstNameKanji: first,
-    mobilePhone: v.phone ?? "",
+    mobilePhone: formatPhoneJp(v.phone),   // 連携シートもハイフン付きで統一
     serviceName: v.planName,
   }).catch((e) => console.error("[payments] entry sheet failed:", String(e?.message ?? e)));
 
