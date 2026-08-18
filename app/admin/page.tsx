@@ -2,6 +2,7 @@ import Link from "next/link";
 import { LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
+import { parseScope } from "@/features/payments/admin-filter";
 import { loadPlans } from "@/features/payments/plans";
 import { todayJst } from "@/features/payments/billing-config";
 import { cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction } from "./actions";
@@ -42,17 +43,38 @@ function statusBadge(v: RegistrantRow["statusLabel"]) {
   return <span className={`chip ${map[v] ?? "chip"}`}>{v}</span>;
 }
 
+// 各行の操作フォーム(解約・プラン変更・削除)に付ける、現在の表示状態。
+// 実行後のリダイレクトでこれを読み戻すため、操作しても一覧の絞り込みが元に戻らない。
+function ViewState({ month, scope, status, q }: { month: string; scope: string; status: string; q: string }) {
+  return (
+    <>
+      <input type="hidden" name="month" value={month} />
+      <input type="hidden" name="scope" value={scope} />
+      <input type="hidden" name="status" value={status} />
+      <input type="hidden" name="q" value={q} />
+    </>
+  );
+}
+
 export default async function AdminBoardPage({
   searchParams,
 }: {
-  searchParams: { month?: string; status?: string; q?: string; del?: string; plan?: string; testcharge?: string; code?: string };
+  searchParams: { month?: string; scope?: string; status?: string; q?: string; del?: string; plan?: string; testcharge?: string; code?: string };
 }) {
   requireAdmin();
   const isProd = String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true";
 
   const month = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : todayJst().slice(0, 7);
+  const scope = parseScope(searchParams.scope);
   const status = searchParams.status ?? "all";
   const q = searchParams.q ?? "";
+
+  // 一覧の表示状態を保ったままの遷移先を組み立てる (更新・タブ切替・全案件リンク)
+  const boardHref = (o: { scope?: string; status?: string } = {}) => {
+    const p = new URLSearchParams({ month, scope: o.scope ?? scope, status: o.status ?? status });
+    if (q) p.set("q", q);
+    return `/admin?${p.toString()}`;
+  };
   const del = searchParams.del ?? "";
   const delMsg: Record<string, { text: string; ok: boolean }> = {
     ok: { text: "案件を完全に削除しました。", ok: true },
@@ -80,8 +102,8 @@ export default async function AdminBoardPage({
     noconfig: { text: "VeriTransの設定（CCID/鍵）が未設定です。", ok: false },
     err: { text: "動作テスト課金に失敗しました。", ok: false },
   };
-  const [{ rows, counts }, plans] = await Promise.all([
-    loadBoard({ month, status, q }),
+  const [{ rows, counts, totalAll, outOfScopeAlerts }, plans] = await Promise.all([
+    loadBoard({ month, status, q, scope }),
     loadPlans(),
   ]);
   const today = todayJst();   // CSV出力の期間の既定値 (当日1日分)
@@ -99,7 +121,7 @@ export default async function AdminBoardPage({
             <Link href={`/admin/revenue?month=${month}`} className="btn btn-primary flex items-center gap-1">
               <TrendingUp size={14} />売上予測ボード
             </Link>
-            <Link href={`/admin?month=${month}&status=${status}&q=${encodeURIComponent(q)}`} className="btn flex items-center gap-1">
+            <Link href={boardHref()} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
             </Link>
             <Link href="/admin/settings" className="btn flex items-center gap-1">
@@ -134,7 +156,7 @@ export default async function AdminBoardPage({
         <div className="card p-4 flex flex-wrap items-center gap-4">
           <form method="get" className="flex items-end gap-2 flex-wrap">
             <div>
-              <div className="label mb-1">対象月</div>
+              <div className="label mb-1">対象月（申込月）</div>
               <input type="month" name="month" defaultValue={month} className="input" />
             </div>
             <div>
@@ -142,9 +164,28 @@ export default async function AdminBoardPage({
               <input type="search" name="q" defaultValue={q} placeholder="MR… / 氏名 / 電話番号" className="input w-52" />
             </div>
             <input type="hidden" name="status" value={status} />
-            <button className="btn btn-primary">表示</button>
+            {/* 現在の表示範囲を保ったまま再検索する (押しただけで全案件→申込月に戻らない) */}
+            <button name="scope" value={scope} className="btn btn-primary">表示</button>
+            {/* 表示範囲の切替。入力中の対象月・検索語もそのまま送信される */}
+            <div className="flex items-center gap-1 pb-1">
+              <button
+                name="scope" value="month"
+                className={"chip " + (scope === "month" ? "chip-navy" : "hover:border-navy/40")}
+              >
+                申込月のみ
+              </button>
+              <button
+                name="scope" value="all"
+                className={"chip " + (scope === "all" ? "chip-navy" : "hover:border-navy/40")}
+              >
+                全案件（{totalAll}）
+              </button>
+            </div>
           </form>
           <div className="flex flex-wrap gap-3 text-sm ml-auto">
+            <span className="text-muted text-[11px] w-full sm:w-auto sm:mr-1">
+              {scope === "month" ? `${month.replace("-", "年")}月 申込分` : "全案件"}
+            </span>
             <span className="text-muted">合計 <b className="text-ink">{counts.total}</b></span>
             <span className="text-muted">利用中 <b className="text-good">{counts.active}</b></span>
             <span className="text-muted">利用前 <b className="text-navy">{counts.before}</b></span>
@@ -157,6 +198,17 @@ export default async function AdminBoardPage({
             </span>
           </div>
         </div>
+
+        {/* 申込月で絞ると他月の要注意案件が一覧から消えるため、件数だけは必ず知らせる */}
+        {scope === "month" && outOfScopeAlerts > 0 && (
+          <div className="card p-3 text-sm flex flex-wrap items-center gap-2">
+            <AlertTriangle size={14} className="text-bad" />
+            <span className="text-bad">他の申込月に要注意の案件が {outOfScopeAlerts} 件あります。</span>
+            <Link href={boardHref({ scope: "all", status: "alert" })} className="underline text-navy font-medium">
+              全案件で確認
+            </Link>
+          </div>
+        )}
 
         {/* ④ CSV出力: 普段は畳んでおき、押したときだけ期間指定を出す (一覧の邪魔をしない) */}
         <details className="card px-3 py-2">
@@ -176,7 +228,7 @@ export default async function AdminBoardPage({
             </button>
             <label className="flex items-center gap-1 text-[11px] text-muted pb-1.5 cursor-pointer">
               {/* 未チェックでも値を送るための hidden。ルート側は "1" の有無で判定する */}
-              <input type="checkbox" name="header" value="1" defaultChecked />
+              <input type="checkbox" name="header" value="1" />
               <input type="hidden" name="header" value="0" />
               見出し行を含める
             </label>
@@ -191,7 +243,7 @@ export default async function AdminBoardPage({
           {STATUS_TABS.map((t) => (
             <Link
               key={t.key}
-              href={`/admin?month=${month}&status=${t.key}&q=${encodeURIComponent(q)}`}
+              href={boardHref({ status: t.key })}
               className={"chip " + (status === t.key ? "chip-navy" : "hover:border-navy/40")}
             >
               {t.label}
@@ -221,7 +273,17 @@ export default async function AdminBoardPage({
             </thead>
             <tbody>
               {rows.length === 0 && (
-                <tr><td colSpan={12} className="px-3 py-8 text-center text-muted">該当する登録者がいません</td></tr>
+                <tr>
+                  <td colSpan={13} className="px-3 py-8 text-center text-muted">
+                    該当する登録者がいません
+                    {scope === "month" && (
+                      <>
+                        <span className="mx-1">（{month.replace("-", "年")}月の申込分）</span>
+                        <Link href={boardHref({ scope: "all" })} className="underline text-navy">全案件を表示</Link>
+                      </>
+                    )}
+                  </td>
+                </tr>
               )}
               {rows.map((r) => (
                 <tr key={r.accountId} className={"border-b border-border/60 " + (r.billingAlert ? "bg-bad/5" : "")}>
@@ -234,7 +296,7 @@ export default async function AdminBoardPage({
                     {r.rawStatus !== "canceled" && (
                       <form action={changePlanAction} className="flex items-center gap-1 mt-1">
                         <input type="hidden" name="accountId" value={r.accountId} />
-                        <input type="hidden" name="month" value={month} />
+                        <ViewState month={month} scope={scope} status={status} q={q} />
                         <select name="planId" defaultValue={r.planId} className="input text-xs py-0.5 px-1 w-auto">
                           {plans.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                         </select>
@@ -263,20 +325,20 @@ export default async function AdminBoardPage({
                       {r.rawStatus !== "canceled" && (
                         <form action={cancelAction}>
                           <input type="hidden" name="accountId" value={r.accountId} />
-                          <input type="hidden" name="month" value={month} />
+                          <ViewState month={month} scope={scope} status={status} q={q} />
                           <CancelButton name={r.name} />
                         </form>
                       )}
                       {!isProd && (
                         <form action={testChargeAction}>
                           <input type="hidden" name="accountId" value={r.accountId} />
-                          <input type="hidden" name="month" value={month} />
+                          <ViewState month={month} scope={scope} status={status} q={q} />
                           <TestChargeButton />
                         </form>
                       )}
                       <form action={deleteAction}>
                         <input type="hidden" name="accountId" value={r.accountId} />
-                        <input type="hidden" name="month" value={month} />
+                        <ViewState month={month} scope={scope} status={status} q={q} />
                         <input type="hidden" name="confirm" value="" />
                         <DeleteButton accountId={r.accountId} />
                       </form>

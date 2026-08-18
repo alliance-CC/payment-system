@@ -2,6 +2,9 @@ import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap, getLicenseKeyMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
+import {
+  filterByScope, filterByStatus, filterByQuery, isAppliedIn, type BoardScope,
+} from "./admin-filter";
 
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
 export type RegistrantRow = {
@@ -26,8 +29,12 @@ export type RegistrantRow = {
 
 export type Board = {
   month: string;            // 対象月 YYYY-MM
+  scope: BoardScope;        // 一覧の表示範囲 (申込月のみ / 全案件)
   rows: RegistrantRow[];
+  // 件数は「表示範囲内」の集計 (一覧の行数と一致させる)
   counts: { total: number; active: number; before: number; canceled: number; incomplete: number; alerts: number };
+  totalAll: number;         // 表示範囲に関わらない全案件数 (「全案件」ボタンの表示用)
+  outOfScopeAlerts: number; // 表示範囲の外にある要注意の件数 (見落とし防止の告知用)
 };
 
 // timestamptz(UTC) → JST の日付 (YYYY-MM-DD)
@@ -36,7 +43,9 @@ function jstDate(iso: string | null): string {
   return new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10);
 }
 
-export async function loadBoard(opts: { month: string; status?: string; q?: string }): Promise<Board> {
+export async function loadBoard(
+  opts: { month: string; status?: string; q?: string; scope?: BoardScope },
+): Promise<Board> {
   const svc = createSupabaseService();
   const policy = await loadBillingPolicy();
   const today = todayJst();
@@ -155,29 +164,27 @@ export async function loadBoard(opts: { month: string; status?: string; q?: stri
     };
   });
 
-  let filtered = opts.status && opts.status !== "all"
-    ? rows.filter((r) => (opts.status === "alert" ? r.billingAlert : r.statusLabel === opts.status))
-    : rows;
+  // 表示範囲: 既定は「対象月に申し込んだ案件のみ」。"all" で全案件。
+  const scope: BoardScope = opts.scope ?? "month";
+  const scoped = filterByScope(rows, scope, month);
 
-  // 会員ID または お客様名での検索
-  const q = (opts.q ?? "").trim().toLowerCase();
-  if (q) {
-    filtered = filtered.filter(
-      (r) =>
-        r.accountId.toLowerCase().includes(q) ||
-        (r.name ?? "").toLowerCase().includes(q) ||
-        (r.phone ?? "").toLowerCase().includes(q),
-    );
-  }
+  // 一覧はさらにステータスタブ・検索で絞る (件数は絞る前=表示範囲の全体で数える)
+  const filtered = filterByQuery(filterByStatus(scoped, opts.status), opts.q);
 
   const counts = {
-    total: rows.length,
-    active: rows.filter((r) => r.statusLabel === "利用中").length,
-    before: rows.filter((r) => r.statusLabel === "利用前").length,
-    canceled: rows.filter((r) => r.statusLabel === "解約").length,
-    incomplete: rows.filter((r) => r.statusLabel === "申込未完了").length,
-    alerts: rows.filter((r) => r.billingAlert).length,
+    total: scoped.length,
+    active: scoped.filter((r) => r.statusLabel === "利用中").length,
+    before: scoped.filter((r) => r.statusLabel === "利用前").length,
+    canceled: scoped.filter((r) => r.statusLabel === "解約").length,
+    incomplete: scoped.filter((r) => r.statusLabel === "申込未完了").length,
+    alerts: scoped.filter((r) => r.billingAlert).length,
   };
 
-  return { month, rows: filtered, counts };
+  // 申込月で絞ると他月の要注意案件が画面から消えるため、件数だけは必ず伝える
+  // (決済不備の放置を、絞り込みのせいで見落とさないようにするための保険)。
+  const outOfScopeAlerts = scope === "all"
+    ? 0
+    : rows.filter((r) => r.billingAlert && !isAppliedIn(r.appliedAt, month)).length;
+
+  return { month, scope, rows: filtered, counts, totalAll: rows.length, outOfScopeAlerts };
 }

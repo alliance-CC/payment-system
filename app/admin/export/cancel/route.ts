@@ -22,10 +22,10 @@ export async function GET(req: Request) {
   const from = validDate(url.searchParams.get("from"), today);
   const to = validDate(url.searchParams.get("to"), from);
 
-  // 見出し行の要否 (先方システムへ取り込む際に見出しが1件として入るのを避けられるように)。
+  // 見出し行の要否。既定は「付けない」— 先方システムへそのまま取り込むのが通常の使い方で、
+  // 見出しが1件のデータとして混入するのを防ぐため。必要なときだけ header=1 を付ける。
   // チェックボックスは hidden と併用するため、順序に依存しない形で判定する。
-  const headerParams = url.searchParams.getAll("header");
-  const withHeader = headerParams.length === 0 ? true : headerParams.includes("1");
+  const withHeader = url.searchParams.getAll("header").includes("1");
 
   const rows = await loadCancelExport(from, to);
 
