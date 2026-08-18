@@ -27,14 +27,26 @@ export async function logoutAction(): Promise<void> {
   redirect("/admin/login");
 }
 
+// 操作後に一覧へ戻るURL。対象月・表示範囲・タブ・検索語を持ち帰るので、
+// 解約やプラン変更をしても絞り込みが最初の状態に戻らない。
+function backToBoard(formData: FormData, extra: Record<string, string> = {}): string {
+  const p = new URLSearchParams();
+  for (const key of ["month", "scope", "status", "q"] as const) {
+    const v = String(formData.get(key) ?? "").trim();
+    if (v) p.set(key, v);
+  }
+  for (const [k, v] of Object.entries(extra)) p.set(k, v);
+  const qs = p.toString();
+  return `/admin${qs ? `?${qs}` : ""}`;
+}
+
 // 解約 (管理画面から)。VeriTrans 会員削除 + 契約 canceled + 次回課金停止。
 // 「退会手続き当月末日まで利用可」(§規約) は cancelSubscription が effectiveUntil を返す。
 export async function cancelAction(formData: FormData): Promise<void> {
   requireAdmin();
   const accountId = String(formData.get("accountId") ?? "").trim();
   if (accountId) await cancelSubscription(accountId);
-  const month = String(formData.get("month") ?? "");
-  redirect(`/admin${month ? `?month=${encodeURIComponent(month)}` : ""}`);
+  redirect(backToBoard(formData));
 }
 
 // 顧客ごとのプラン変更。契約の plan_id/plan_name/amount を書き換えるだけ。
@@ -44,8 +56,7 @@ export async function changePlanAction(formData: FormData): Promise<void> {
   requireAdmin();
   const accountId = String(formData.get("accountId") ?? "").trim();
   const planId = String(formData.get("planId") ?? "").trim();
-  const month = String(formData.get("month") ?? "");
-  const to = (s: string) => `/admin?${month ? `month=${encodeURIComponent(month)}&` : ""}plan=${s}`;
+  const to = (s: string) => backToBoard(formData, { plan: s });
 
   if (!accountId || !planId) redirect(to("err"));
   const contract = await getContractByAccountId(accountId);
@@ -70,8 +81,8 @@ export async function changePlanAction(formData: FormData): Promise<void> {
 export async function testChargeAction(formData: FormData): Promise<void> {
   requireAdmin();
   const accountId = String(formData.get("accountId") ?? "").trim();
-  const month = String(formData.get("month") ?? "");
-  const to = (s: string, extra = "") => `/admin?${month ? `month=${encodeURIComponent(month)}&` : ""}testcharge=${s}${extra}`;
+  const to = (s: string, code = "") =>
+    backToBoard(formData, code ? { testcharge: s, code } : { testcharge: s });
 
   if (String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true") redirect(to("prod"));
   if (!accountId) redirect(to("err"));
@@ -93,7 +104,7 @@ export async function testChargeAction(formData: FormData): Promise<void> {
     ok = false;
     code = String(e?.message ?? e).slice(0, 40);
   }
-  redirect(to(ok ? "ok" : "fail", code ? `&code=${encodeURIComponent(code)}` : ""));
+  redirect(to(ok ? "ok" : "fail", code));
 }
 
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。
@@ -102,8 +113,7 @@ export async function deleteAction(formData: FormData): Promise<void> {
   requireAdmin();
   const accountId = String(formData.get("accountId") ?? "").trim();
   const confirm = String(formData.get("confirm") ?? "").trim();
-  const month = String(formData.get("month") ?? "");
-  const to = (status: string) => `/admin?${month ? `month=${encodeURIComponent(month)}&` : ""}del=${status}`;
+  const to = (result: string) => backToBoard(formData, { del: result });
 
   // ① 確認: 入力された会員IDが対象と一致しない削除は実行しない
   if (!accountId || confirm !== accountId) redirect(to("mismatch"));
