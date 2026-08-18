@@ -1,16 +1,25 @@
 import Link from "next/link";
-import { LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp } from "lucide-react";
+import {
+  LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp, CheckSquare, X,
+} from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { parseScope } from "@/features/payments/admin-filter";
 import { loadPlans } from "@/features/payments/plans";
 import { todayJst } from "@/features/payments/billing-config";
-import { cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction } from "./actions";
+import {
+  cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
+} from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
 import ChangePlanButton from "./ChangePlanButton";
 import TestChargeButton from "./TestChargeButton";
 import CopyButton from "./CopyButton";
+import SelectAllCheckbox from "./SelectAllCheckbox";
+
+// エントリー済みチェックの保存先フォーム。行内のチェックボックスは form 属性でここへ紐づける
+// (行には解約・削除のフォームが既にあり、フォームを入れ子にできないため)。
+const MARK_FORM_ID = "entry-mark-form";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "登録者管理 | Memoreal Payments" };
@@ -22,6 +31,7 @@ const STATUS_TABS = [
   { key: "解約", label: "解約" },
   { key: "申込未完了", label: "申込未完了" },
   { key: "alert", label: "要注意" },
+  { key: "entry-todo", label: "未エントリー" },
 ] as const;
 
 function billingBadge(v: RegistrantRow["monthBilling"]) {
@@ -59,7 +69,11 @@ function ViewState({ month, scope, status, q }: { month: string; scope: string; 
 export default async function AdminBoardPage({
   searchParams,
 }: {
-  searchParams: { month?: string; scope?: string; status?: string; q?: string; del?: string; plan?: string; testcharge?: string; code?: string };
+  searchParams: {
+    month?: string; scope?: string; status?: string; q?: string;
+    del?: string; plan?: string; testcharge?: string; code?: string;
+    select?: string; entry?: string; n?: string; eerr?: string;
+  };
 }) {
   requireAdmin();
   const isProd = String(process.env.VT_PRODUCTION ?? "").toLowerCase() === "true";
@@ -69,10 +83,14 @@ export default async function AdminBoardPage({
   const status = searchParams.status ?? "all";
   const q = searchParams.q ?? "";
 
+  // エントリー済みチェックの選択モード (?select=1)。URLで持つのでリロードしても外れない
+  const selectMode = searchParams.select === "1";
+
   // 一覧の表示状態を保ったままの遷移先を組み立てる (更新・タブ切替・全案件リンク)
-  const boardHref = (o: { scope?: string; status?: string } = {}) => {
+  const boardHref = (o: { scope?: string; status?: string; select?: boolean } = {}) => {
     const p = new URLSearchParams({ month, scope: o.scope ?? scope, status: o.status ?? status });
     if (q) p.set("q", q);
+    if (o.select ?? selectMode) p.set("select", "1");
     return `/admin?${p.toString()}`;
   };
   const del = searchParams.del ?? "";
@@ -101,6 +119,18 @@ export default async function AdminBoardPage({
     notfound: { text: "対象の案件が見つかりませんでした。", ok: false },
     noconfig: { text: "VeriTransの設定（CCID/鍵）が未設定です。", ok: false },
     err: { text: "動作テスト課金に失敗しました。", ok: false },
+  };
+  const entryRes = searchParams.entry ?? "";
+  const entryN = searchParams.n ?? "";
+  const entryMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: `${entryN}件を「エントリー済み」にしました。`, ok: true },
+    undo: { text: `${entryN}件の「エントリー済み」を取り消しました。`, ok: true },
+    none: { text: "案件が選択されていません。チェックを入れてから保存してください。", ok: false },
+    err: {
+      text: `エントリー済みの保存に失敗しました${searchParams.eerr ? `（${searchParams.eerr}）` : ""}。`
+        + " entered_at 列が未作成の可能性があります（p004_entered_at.sql を実行してください）。",
+      ok: false,
+    },
   };
   const [{ rows, counts, totalAll, outOfScopeAlerts }, plans] = await Promise.all([
     loadBoard({ month, status, q, scope }),
@@ -151,6 +181,12 @@ export default async function AdminBoardPage({
             {testMsg[testRes].text}
           </div>
         )}
+        {/* エントリー済みチェックの結果通知 */}
+        {entryRes && entryMsg[entryRes] && (
+          <div className={"card p-3 text-sm " + (entryMsg[entryRes].ok ? "text-good" : "text-bad")}>
+            {entryMsg[entryRes].text}
+          </div>
+        )}
 
         {/* サマリ + 月選択 */}
         <div className="card p-4 flex flex-wrap items-center gap-4">
@@ -193,6 +229,7 @@ export default async function AdminBoardPage({
             {counts.incomplete > 0 && (
               <span className="text-muted">申込未完了 <b className="text-accent">{counts.incomplete}</b></span>
             )}
+            <span className="text-muted">未エントリー <b className="text-accent">{counts.entryTodo}</b></span>
             <span className="text-muted flex items-center gap-1">
               <AlertTriangle size={13} className="text-bad" />要注意 <b className="text-bad">{counts.alerts}</b>
             </span>
@@ -238,6 +275,46 @@ export default async function AdminBoardPage({
           </form>
         </details>
 
+        {/* エントリー済みチェック: 通常はボタン1つ、押すと選択モード (チェック欄 + 保存) */}
+        {selectMode ? (
+          <form id={MARK_FORM_ID} action={markEnteredAction} className="card p-3 flex flex-wrap items-center gap-2">
+            <ViewState month={month} scope={scope} status={status} q={q} />
+            <span className="text-sm font-medium text-navy flex items-center gap-1.5">
+              <CheckSquare size={14} />エントリー済みにする案件をチェックしてください
+            </span>
+            <div className="flex items-center gap-2 ml-auto">
+              <button name="entered" value="1" className="btn btn-primary text-xs py-1">
+                チェックした案件を「エントリー済み」にする
+              </button>
+              <button name="entered" value="0" className="btn text-xs py-1">
+                取り消す
+              </button>
+              <Link href={boardHref({ select: false })} className="btn text-xs py-1 flex items-center gap-1">
+                <X size={12} />やめる
+              </Link>
+            </div>
+          </form>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href={boardHref({ select: true })} className="btn flex items-center gap-1 text-xs py-1">
+              <CheckSquare size={14} />エントリー済みをチェックする
+            </Link>
+            {counts.entryTodo > 0 && (
+              <span className="text-[11px] text-muted">
+                未エントリー {counts.entryTodo} 件
+                {status !== "entry-todo" && (
+                  <>
+                    <span className="mx-1">·</span>
+                    <Link href={boardHref({ status: "entry-todo" })} className="underline text-navy">
+                      未エントリーだけ表示
+                    </Link>
+                  </>
+                )}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* ステータスタブ */}
         <div className="flex flex-wrap gap-1.5">
           {STATUS_TABS.map((t) => (
@@ -256,12 +333,16 @@ export default async function AdminBoardPage({
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="text-left text-[11px] uppercase tracking-wider text-muted border-b border-border">
+                {selectMode && (
+                  <th className="px-3 py-2 font-medium w-8"><SelectAllCheckbox /></th>
+                )}
                 <th className="px-3 py-2 font-medium">申込日</th>
                 <th className="px-3 py-2 font-medium">会員ID</th>
                 <th className="px-3 py-2 font-medium">プラン</th>
                 <th className="px-3 py-2 font-medium">利用開始</th>
                 <th className="px-3 py-2 font-medium">課金開始</th>
                 <th className="px-3 py-2 font-medium">状況</th>
+                <th className="px-3 py-2 font-medium">エントリー</th>
                 <th className="px-3 py-2 font-medium">当月課金 ({month})</th>
                 <th className="px-3 py-2 font-medium">お客様</th>
                 <th className="px-3 py-2 font-medium">ライセンスキー</th>
@@ -274,7 +355,7 @@ export default async function AdminBoardPage({
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="px-3 py-8 text-center text-muted">
+                  <td colSpan={selectMode ? 15 : 14} className="px-3 py-8 text-center text-muted">
                     該当する登録者がいません
                     {scope === "month" && (
                       <>
@@ -287,6 +368,15 @@ export default async function AdminBoardPage({
               )}
               {rows.map((r) => (
                 <tr key={r.accountId} className={"border-b border-border/60 " + (r.billingAlert ? "bg-bad/5" : "")}>
+                  {selectMode && (
+                    <td className="px-3 py-2">
+                      {/* 行内の他フォームと入れ子にならないよう form 属性で保存先を指定する */}
+                      <input
+                        type="checkbox" name="accountIds" value={r.accountId} form={MARK_FORM_ID}
+                        aria-label={`${r.accountId} を選択`}
+                      />
+                    </td>
+                  )}
                   <td className="px-3 py-2 text-muted">{r.appliedAt}</td>
                   <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
                     {r.accountId} <CopyButton value={r.accountId} />
@@ -307,6 +397,15 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2 text-muted">{r.serviceStart}</td>
                   <td className="px-3 py-2 text-muted">{r.chargeStart}</td>
                   <td className="px-3 py-2">{statusBadge(r.statusLabel)}</td>
+                  <td className="px-3 py-2">
+                    {r.enteredAt ? (
+                      <span className="chip chip-good" title={`${r.enteredAt} にエントリー済み`}>済</span>
+                    ) : r.statusLabel === "利用前" || r.statusLabel === "利用中" ? (
+                      <span className="chip chip-gold">未</span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">{billingBadge(r.monthBilling)}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.name ?? "-"}</div>

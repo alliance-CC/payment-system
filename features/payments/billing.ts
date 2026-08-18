@@ -13,7 +13,9 @@ import { loadPlan } from "./plans";
 import { newAccountId, accountIdFromCaseId, isValidAccountId } from "./account";
 import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
 import { appendSignupRow } from "./signup-sheet";
-import { appendEntryRow, appendCancelRow, assignLicenseKey } from "./entry-sheet";
+import {
+  appendEntryRow, appendCancelRow, assignLicenseKey, updateEntryWithdrawalDate,
+} from "./entry-sheet";
 import { formatPhoneJp } from "./phone";
 import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
@@ -1377,6 +1379,10 @@ export async function cancelSubscription(accountId: string): Promise<{ ok: boole
     canceledDate: todayJst(),
     serviceName: contract.plan_name ?? contract.plan_id,
   }).catch((e) => console.error("[payments] cancel sheet failed:", String(e?.message ?? e)));
+
+  // エントリータブ側の「退会日」も埋める (先方はエントリー表で在籍を見るため)。
+  await updateEntryWithdrawalDate(contract.account_id, todayJst())
+    .catch((e) => console.error("[payments] entry withdrawal write failed:", String(e?.message ?? e)));
 
   return { ok: true, effectiveUntil };
 }

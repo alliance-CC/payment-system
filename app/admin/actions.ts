@@ -3,7 +3,9 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
 import { cancelSubscription } from "@/features/payments/billing";
-import { hardDeleteContractByAccountId, getContractByAccountId, updateContractRow } from "@/features/payments/store";
+import {
+  hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds,
+} from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
 import { chargeByAccount, deleteAccount } from "@/features/payments/veritrans/paynowid";
 import { loadVeritransConfig } from "@/features/payments/veritrans/config";
@@ -105,6 +107,29 @@ export async function testChargeAction(formData: FormData): Promise<void> {
     code = String(e?.message ?? e).slice(0, 40);
   }
   redirect(to(ok ? "ok" : "fail", code));
+}
+
+// 先方システムへの「エントリー済み」を一括で立てる / 外す。
+//   チェックした案件だけを対象にする。決済・契約の状態には一切影響しない
+//   (entered_at という記録用の列を更新するだけ)。
+export async function markEnteredAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountIds = formData.getAll("accountIds").map(String).filter(Boolean);
+  const entered = String(formData.get("entered") ?? "1") === "1";
+
+  // 未選択のまま保存された場合は選択モードのまま戻す (やり直せるように)
+  if (!accountIds.length) redirect(backToBoard(formData, { select: "1", entry: "none" }));
+
+  const res = await setEnteredByAccountIds(accountIds, entered);
+  if (!res.ok) {
+    redirect(backToBoard(formData, {
+      select: "1", entry: "err", eerr: (res.error ?? "unknown").slice(0, 200),
+    }));
+  }
+  redirect(backToBoard(formData, {
+    entry: entered ? "ok" : "undo",
+    n: String(res.count),
+  }));
 }
 
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。

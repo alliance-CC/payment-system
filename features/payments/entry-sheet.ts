@@ -20,17 +20,42 @@ export const ENTRY_TAB = "エントリー";
 export const CANCEL_TAB = "解約";
 export const LICENSE_TAB = "ライセンスキー";
 
-/** エントリータブの1行 (画像1の項目順 A〜H) */
+/** エントリータブの1行 (項目順 A〜J) */
 export type EntrySheetRow = {
-  customerId: string;      // A 顧客ID (= 会員ID)
-  contractDate: string;    // B ご契約日 (= 申込日)
-  serviceStartDate: string;// C ご利用開始日
-  chargeStartDate: string; // D 課金開始日
-  lastNameKanji: string;   // E 契約者名_姓_漢字
-  firstNameKanji: string;  // F 契約者名_名_漢字
-  mobilePhone: string;     // G 電話番号_携帯
-  serviceName: string;     // H ご加入サービス名
+  customerId: string;       // A 顧客ID (= 会員ID)
+  contractDate: string;     // B ご契約日 (= 申込日)
+  serviceStartDate: string; // C ご利用開始日
+  chargeStartDate: string;  // E 課金開始日
+  lastNameKanji: string;    // F 契約者名_姓_漢字
+  firstNameKanji: string;   // G 契約者名_名_漢字
+  mobilePhone: string;      // H 電話番号_携帯
+  serviceName: string;      // J ご加入サービス名
+  // D「ネトサポご利用開始日」は serviceStartDate から算出する (netlifeStartDate)。
+  // I「退会日」は申込時点では空。解約時に updateEntryWithdrawalDate で後追い記入する。
 };
+
+/** エントリータブの列位置 (1始まり)。シートの項目が増えたときはここだけ直す。 */
+const ENTRY_COL = {
+  customerId: 1,        // A
+  withdrawalDate: 9,    // I
+} as const;
+
+/**
+ * D列「ネトサポご利用開始日」= ネットライフサポートの利用開始日。
+ * ネットライフサポートだけは引っ越し日 (ご利用開始日) の翌月1日から利用開始になるため、
+ * ご利用開始日とは別の日付をシートに書く。
+ *
+ * システム側の項目は増やさない (契約に持つ利用開始日は1つのまま) — ここは
+ * シートへ書くときの表記だけの話であり、課金日の計算には一切使わない。
+ */
+export function netlifeStartDate(serviceStartDate: string): string {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec((serviceStartDate ?? "").trim());
+  if (!m) return "";                       // 利用開始日が不明なら空欄のまま
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const idx = y * 12 + (mo - 1) + 1;       // 翌月
+  return `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, "0")}-01`;
+}
 
 /** 解約タブの1行 (画像2の項目順 A〜E) */
 export type CancelSheetRow = {
@@ -130,12 +155,57 @@ export async function appendEntryRow(row: EntrySheetRow): Promise<"written" | "d
     const client = await getSheets();
     if (!client) return "skipped"; // 未設定 = 何もしない
     return await writeToFirstEmptyRow(client, ENTRY_TAB, [
-      row.customerId, row.contractDate, row.serviceStartDate, row.chargeStartDate,
-      row.lastNameKanji, row.firstNameKanji, row.mobilePhone, row.serviceName,
+      row.customerId,                             // A 顧客ID
+      row.contractDate,                           // B ご契約日
+      row.serviceStartDate,                       // C ご利用開始日
+      netlifeStartDate(row.serviceStartDate),     // D ネトサポご利用開始日 (Cの翌月1日)
+      row.chargeStartDate,                        // E 課金開始日
+      row.lastNameKanji,                          // F 契約者名_姓_漢字
+      row.firstNameKanji,                         // G 契約者名_名_漢字
+      row.mobilePhone,                            // H 電話番号_携帯
+      "",                                         // I 退会日 (解約時に後から記入)
+      row.serviceName,                            // J ご加入サービス名
     ], row.customerId);
   } catch (e: any) {
     console.error("[entry-sheet] entry write failed:", String(e?.message ?? e));
     return "skipped";
+  }
+}
+
+/**
+ * ③補足 エントリータブ I列「退会日」を後から記入する (非ブロッキング)。
+ * 解約タブへの記録とは別に、エントリー行そのものにも退会日を残す
+ * (先方はエントリー表を見て在籍を判断するため、解約タブだけだと突き合わせが要る)。
+ * 該当する顧客IDの行が無ければ何もしない。
+ */
+export async function updateEntryWithdrawalDate(customerId: string, canceledDate: string): Promise<void> {
+  try {
+    const key = (customerId ?? "").trim();
+    if (!key) return;
+    const client = await getSheets();
+    if (!client) return;
+    const { sheets, spreadsheetId } = client;
+
+    const col = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${ENTRY_TAB}!A1:A100000`,
+    });
+    const rows: any[][] = col?.data?.values ?? [];
+    let target = -1;
+    for (let i = 1; i < rows.length; i++) {                 // 1行目は見出し
+      if (String(rows[i]?.[0] ?? "").trim() === key) { target = i + 1; break; }
+    }
+    if (target === -1) return;                              // エントリー行が無い = 書く先が無い
+
+    const cell = `${ENTRY_TAB}!${String.fromCharCode(64 + ENTRY_COL.withdrawalDate)}${target}`;
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: cell,
+      valueInputOption: "USER_ENTERED",
+      requestBody: { values: [[canceledDate]] },
+    });
+  } catch (e: any) {
+    console.error("[entry-sheet] withdrawal date write failed:", String(e?.message ?? e));
   }
 }
 

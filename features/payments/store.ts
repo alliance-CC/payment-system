@@ -80,6 +80,50 @@ export async function getServiceStartMap(ids: string[]): Promise<Map<string, str
   return map;
 }
 
+/** contract_id → エントリー済み日時 のマップをベストエフォートで取得 (列 p004 未適用なら空)。 */
+export async function getEnteredMap(ids: string[]): Promise<Map<string, string | null>> {
+  const map = new Map<string, string | null>();
+  if (!ids.length) return map;
+  try {
+    const service = createSupabaseService();
+    const { data, error } = await service
+      .from("payment_contracts").select("id, entered_at").in("id", ids);
+    if (error) return map;
+    for (const r of data ?? []) map.set((r as any).id, (r as any).entered_at ?? null);
+  } catch { /* 列が無ければ空マップ (全件「未エントリー」表示になる) */ }
+  return map;
+}
+
+/**
+ * 会員IDの一覧に「エントリー済み」を立てる / 外す (管理画面のチェック保存)。
+ *
+ * 他のベストエフォート系と違い、ここは失敗を握りつぶさない —
+ * 担当者が「保存した」と思ったまま記録されていないと、エントリー漏れに直結するため。
+ * 列 p004 が未適用ならその旨を error で返す。
+ */
+export async function setEnteredByAccountIds(
+  accountIds: string[],
+  entered: boolean,
+): Promise<{ ok: boolean; count: number; error?: string }> {
+  const ids = accountIds.map((s) => String(s ?? "").trim()).filter(Boolean);
+  if (!ids.length) return { ok: true, count: 0 };
+  try {
+    const service = createSupabaseService();
+    let qb = service
+      .from("payment_contracts")
+      .update({ entered_at: entered ? new Date().toISOString() : null })
+      .in("account_id", ids);
+    // 既にエントリー済みの案件は日時を上書きしない (いつ対応したかの記録を残すため)。
+    // 結果の件数も「実際に変わった件数」になる。
+    if (entered) qb = qb.is("entered_at", null);
+    const { data, error } = await qb.select("id");
+    if (error) return { ok: false, count: 0, error: error.message };
+    return { ok: true, count: (data ?? []).length };
+  } catch (e: any) {
+    return { ok: false, count: 0, error: String(e?.message ?? e) };
+  }
+}
+
 /**
  * 案件をDBから完全削除する (テスト案件のクリーンアップ用)。
  * payment_charges → payment_consents → payment_contracts の順で物理削除する。
