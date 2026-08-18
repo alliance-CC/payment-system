@@ -1,7 +1,7 @@
 // 管理ボードの絞り込みテスト。表示範囲(申込月/全案件)・タブ・検索の挙動を固定する。
 import { describe, it, expect } from "vitest";
 import {
-  parseScope, isAppliedIn, filterByScope, filterByStatus, filterByQuery,
+  parseScope, isAppliedIn, filterByScope, filterByStatus, filterByQuery, isEntryTodo,
 } from "./admin-filter";
 
 type Row = {
@@ -9,6 +9,7 @@ type Row = {
   appliedAt: string;
   statusLabel: string;
   billingAlert: boolean;
+  enteredAt: string | null;
   name: string | null;
   phone: string | null;
 };
@@ -17,6 +18,7 @@ const row = (o: Partial<Row> & { accountId: string }): Row => ({
   appliedAt: "2026-08-10",
   statusLabel: "利用中",
   billingAlert: false,
+  enteredAt: null,
   name: null,
   phone: null,
   ...o,
@@ -93,6 +95,33 @@ describe("ステータスタブでの絞り込み", () => {
 
   it("alert は要注意フラグで絞る", () => {
     expect(filterByStatus(rows, "alert").map((r) => r.accountId)).toEqual(["MR-C"]);
+  });
+});
+
+describe("未エントリーの判定", () => {
+  it("エントリー済みなら対象外", () => {
+    expect(isEntryTodo({ statusLabel: "利用中", enteredAt: "2026-08-15" })).toBe(false);
+  });
+
+  it("利用前・利用中でエントリー未済なら作業待ち", () => {
+    expect(isEntryTodo({ statusLabel: "利用前", enteredAt: null })).toBe(true);
+    expect(isEntryTodo({ statusLabel: "利用中", enteredAt: null })).toBe(true);
+  });
+
+  it("解約・申込未完了はエントリー不要なので作業待ちに数えない", () => {
+    expect(isEntryTodo({ statusLabel: "解約", enteredAt: null })).toBe(false);
+    expect(isEntryTodo({ statusLabel: "申込未完了", enteredAt: null })).toBe(false);
+  });
+
+  it("entry-todo タブは未エントリーだけを返す", () => {
+    const rows = [
+      row({ accountId: "MR-A" }),                                      // 利用中・未 → 対象
+      row({ accountId: "MR-B", enteredAt: "2026-08-15" }),             // 済 → 対象外
+      row({ accountId: "MR-C", statusLabel: "解約" }),                 // 解約 → 対象外
+      row({ accountId: "MR-D", statusLabel: "申込未完了" }),           // 未完了 → 対象外
+      row({ accountId: "MR-E", statusLabel: "利用前" }),               // 利用前・未 → 対象
+    ];
+    expect(filterByStatus(rows, "entry-todo").map((r) => r.accountId)).toEqual(["MR-A", "MR-E"]);
   });
 });
 

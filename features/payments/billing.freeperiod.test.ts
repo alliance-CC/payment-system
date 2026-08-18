@@ -119,6 +119,7 @@ vi.mock("./entry-sheet", () => ({
   appendEntryRow: async () => {},
   appendCancelRow: async () => {},
   assignLicenseKey: async () => null,
+  updateEntryWithdrawalDate: async () => {},
 }));
 
 vi.mock("./crm-adapter", () => ({

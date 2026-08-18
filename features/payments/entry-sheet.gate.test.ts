@@ -9,7 +9,7 @@
 // が要件なので、そこを固定する。
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { createServer, type Server, type IncomingMessage } from "http";
-import { pickTargetRow } from "./entry-sheet";
+import { pickTargetRow, netlifeStartDate } from "./entry-sheet";
 
 const CCID = "A100000000000000000000cc";
 const KEY = "test-merchant-key";
@@ -289,5 +289,28 @@ describe("エントリー行の書き込み先 (pickTargetRow)", () => {
   it("顧客IDを渡さない場合は重複判定しない (解約タブ等)", () => {
     const rows = [...header, ["MR1"]];
     expect(pickTargetRow(rows)).toEqual({ row: 3 });
+  });
+});
+
+describe("D列 ネトサポご利用開始日 (ご利用開始日の翌月1日)", () => {
+  it("月の途中でも翌月1日になる", () => {
+    expect(netlifeStartDate("2026-08-15")).toBe("2026-09-01");
+    expect(netlifeStartDate("2026-08-01")).toBe("2026-09-01");
+    expect(netlifeStartDate("2026-08-31")).toBe("2026-09-01");
+  });
+
+  it("年をまたぐ", () => {
+    expect(netlifeStartDate("2026-12-20")).toBe("2027-01-01");
+  });
+
+  it("2月・31日の無い月でも1日固定なので破綻しない", () => {
+    expect(netlifeStartDate("2026-01-31")).toBe("2026-02-01");
+    expect(netlifeStartDate("2026-02-28")).toBe("2026-03-01");
+  });
+
+  it("利用開始日が不明なら空欄 (勝手な日付を先方へ渡さない)", () => {
+    expect(netlifeStartDate("")).toBe("");
+    expect(netlifeStartDate("2026-08")).toBe("");
+    expect(netlifeStartDate("不明")).toBe("");
   });
 });

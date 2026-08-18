@@ -31,13 +31,24 @@ export function filterByScope<T extends { appliedAt: string }>(
   return rows.filter((r) => isAppliedIn(r.appliedAt, month));
 }
 
-/** ステータスタブでの絞り込み。"all" / 未指定は素通し、"alert" は要注意のみ。 */
-export function filterByStatus<T extends { statusLabel: string; billingAlert: boolean }>(
+/**
+ * 先方システムへのエントリーがまだ必要な案件か。
+ * 対象は「申込が成立していて解約もしていない」もの — 申込未完了 (決済登録が済んでいない)
+ * や解約済みはエントリーする必要が無いので、作業待ちとして数えない。
+ */
+export function isEntryTodo(r: { statusLabel: string; enteredAt: string | null }): boolean {
+  if (r.enteredAt) return false;
+  return r.statusLabel === "利用前" || r.statusLabel === "利用中";
+}
+
+/** ステータスタブでの絞り込み。"all" / 未指定は素通し、"alert" は要注意、"entry-todo" は未エントリー。 */
+export function filterByStatus<T extends { statusLabel: string; billingAlert: boolean; enteredAt: string | null }>(
   rows: T[],
   status: string | null | undefined,
 ): T[] {
   if (!status || status === "all") return rows;
   if (status === "alert") return rows.filter((r) => r.billingAlert);
+  if (status === "entry-todo") return rows.filter(isEntryTodo);
   return rows.filter((r) => r.statusLabel === status);
 }
 

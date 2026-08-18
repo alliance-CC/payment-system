@@ -1,9 +1,9 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getServiceStartMap, getLicenseKeyMap } from "./store";
+import { getServiceStartMap, getLicenseKeyMap, getEnteredMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
 import {
-  filterByScope, filterByStatus, filterByQuery, isAppliedIn, type BoardScope,
+  filterByScope, filterByStatus, filterByQuery, isAppliedIn, isEntryTodo, type BoardScope,
 } from "./admin-filter";
 
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
@@ -23,6 +23,7 @@ export type RegistrantRow = {
   email: string | null;
   consented: boolean;       // 利用規約 同意済み
   licenseKey: string | null;// ウイルスバスターのライセンスキー (プレミアムのみ)
+  enteredAt: string | null; // 先方システムへエントリー済みの日付 (YYYY-MM-DD, JST)。null = 未
   monthBilling: "正常" | "決済不備" | "確認中" | "未課金" | "課金予定" | "対象外";
   billingAlert: boolean;    // 決済不備・確認中・延滞・期限切れ等の要注意
 };
@@ -32,7 +33,10 @@ export type Board = {
   scope: BoardScope;        // 一覧の表示範囲 (申込月のみ / 全案件)
   rows: RegistrantRow[];
   // 件数は「表示範囲内」の集計 (一覧の行数と一致させる)
-  counts: { total: number; active: number; before: number; canceled: number; incomplete: number; alerts: number };
+  counts: {
+    total: number; active: number; before: number; canceled: number; incomplete: number;
+    alerts: number; entryTodo: number;
+  };
   totalAll: number;         // 表示範囲に関わらない全案件数 (「全案件」ボタンの表示用)
   outOfScopeAlerts: number; // 表示範囲の外にある要注意の件数 (見落とし防止の告知用)
 };
@@ -64,6 +68,8 @@ export async function loadBoard(
   const ssMap = await getServiceStartMap(ids);
   // ② 付与済みライセンスキー (列 p002 未適用なら空 → 表示は「—」)
   const lkMap = await getLicenseKeyMap(ids);
+  // エントリー済みの記録 (列 p004 未適用なら空 → 全件「未」表示)
+  const enMap = await getEnteredMap(ids);
 
   // 同意記録の有無 (account_id 単位)
   const { data: consents } = await svc.from("payment_consents").select("account_id");
@@ -159,6 +165,7 @@ export async function loadBoard(
       email: c.contact_email,
       consented: consentSet.has(c.account_id),
       licenseKey: lkMap.get(c.id) ?? null,
+      enteredAt: jstDate(enMap.get(c.id) ?? null) || null,
       monthBilling,
       billingAlert,
     };
@@ -178,6 +185,7 @@ export async function loadBoard(
     canceled: scoped.filter((r) => r.statusLabel === "解約").length,
     incomplete: scoped.filter((r) => r.statusLabel === "申込未完了").length,
     alerts: scoped.filter((r) => r.billingAlert).length,
+    entryTodo: scoped.filter(isEntryTodo).length,
   };
 
   // 申込月で絞ると他月の要注意案件が画面から消えるため、件数だけは必ず伝える
