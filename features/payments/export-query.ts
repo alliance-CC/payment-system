@@ -5,6 +5,7 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap, getLicenseKeyMap } from "./store";
+import { formatPhoneJp } from "./phone";
 
 export type EntryExportRow = {
   accountId: string;
@@ -111,7 +112,7 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
       chargeStartDate: r.next_charge_date ?? "",
       lastNameKanji: last,
       firstNameKanji: first,
-      mobilePhone: r.contact_phone ?? "",
+      mobilePhone: formatPhoneJp(r.contact_phone),   // 先方へはハイフン付きで統一
     };
   });
 }
