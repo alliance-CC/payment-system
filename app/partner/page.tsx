@@ -21,7 +21,7 @@ export default async function PartnerDashboardPage({
 }: {
   searchParams: { month?: string };
 }) {
-  await requirePartner();
+  requirePartner();
 
   const view = await loadPartnerBoard();
 

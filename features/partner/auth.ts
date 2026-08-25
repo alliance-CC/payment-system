@@ -6,35 +6,37 @@ import { loadPaymentSettings } from "@/features/payments/payment-settings";
 
 // 外部企業向けダッシュボード (/partner) の簡易認証。
 //
-// 管理ボード (/admin) とは完全に別系統:
-//   ・Cookie が別 (管理者としてログインしても /partner には入れないし、その逆も同じ)
-//   ・パスワードが別 (課金設定で発行し、外部企業へ渡す)
-//   ・見せる項目も別 (お客様名/ご契約日/ご利用開始日/退会日/ご加入サービス名 のみ)
+// 管理ボード (/admin) とは別系統: Cookie もパスワードも別で、
+// 管理者としてログインしても /partner には入れないし、その逆も同じ。
 //
 // パスワードの取得元: 課金設定 (DB) を優先し、無ければ環境変数 PARTNER_PASSWORD。
 // 未設定なら誰も入れない (誤って全開放しない)。
 //
-// セッショントークンはパスワード自体を鍵にして導出する。
-// → パスワードを変更すると、発行済みのセッションはすべて無効になる (取引先の入替え時に確実)。
+// ⚠️ ログイン後の判定 (isPartnerAuthed) は DB を読まない。
+//    Cookie の署名を照合するだけにしてある — ここで設定の読み込みに失敗すると
+//    「ログインは通るのに一覧に入れない」という原因の分かりにくい状態になるため。
+//    パスワードの照合はログイン時の1回だけ行う。
 export const PARTNER_COOKIE = "pay_partner";
 export const PARTNER_MAX_AGE = 60 * 60 * 8; // 8時間
 
 /** 設定されている外部ダッシュボードのパスワード (未設定なら空文字)。 */
 export async function partnerPassword(): Promise<string> {
-  const fromEnv = String(process.env.PARTNER_PASSWORD ?? "").trim();
   try {
     const s = await loadPaymentSettings();
     const fromDb = String(s.partnerPassword ?? "").trim();
     if (fromDb) return fromDb;
   } catch { /* DB不通なら env にフォールバック */ }
-  return fromEnv;
+  return String(process.env.PARTNER_PASSWORD ?? "").trim();
 }
 
-/** ログイン成功時に Cookie へ入れる署名トークン (パスワードそのものは保存しない)。 */
-export function partnerSessionToken(password: string): string {
-  return createHmac("sha256", password || "memoreal-partner")
-    .update("pay-partner-session-v1")
-    .digest("hex");
+/** Cookie に入れる署名トークン。パスワードそのものは保存しない。 */
+export function partnerSessionToken(): string {
+  const secret =
+    process.env.PARTNER_SESSION_SECRET ||
+    process.env.ADMIN_SESSION_SECRET ||
+    process.env.ADMIN_PASSWORD ||
+    "memoreal-partner";
+  return createHmac("sha256", secret).update("pay-partner-session-v1").digest("hex");
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -43,28 +45,26 @@ function safeEqual(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
+/** ログイン時のパスワード照合。保存側と同じく前後の空白は無視する
+ *  (コピー&ペーストで空白や改行が付くだけで弾かれないように)。 */
 export async function verifyPartnerPassword(input: string): Promise<boolean> {
   const pw = await partnerPassword();
   if (!pw) return false;                       // 未設定なら不許可
-  // 保存時に trim しているので照合側も trim する。
-  // コピー&ペーストで前後に空白や改行が付くことがあり、それだけで弾かれると
-  // 「パスワードが違います」の原因が外部企業側からは分からないため。
   return safeEqual(String(input ?? "").trim(), pw);
 }
 
-export async function isPartnerAuthed(): Promise<boolean> {
-  const pw = await partnerPassword();
-  if (!pw) return false;
+/** ログイン済みか。Cookie の署名照合のみ (DBアクセス無し)。 */
+export function isPartnerAuthed(): boolean {
   const c = cookies().get(PARTNER_COOKIE)?.value;
-  return !!c && safeEqual(c, partnerSessionToken(pw));
+  return !!c && safeEqual(c, partnerSessionToken());
 }
 
-/** 保護ページ/アクションの先頭で呼ぶ。未認証なら /partner/login へ。 */
-export async function requirePartner(): Promise<void> {
-  if (!(await isPartnerAuthed())) redirect("/partner/login");
+/** 保護ページの先頭で呼ぶ。未認証なら /partner/login へ。 */
+export function requirePartner(): void {
+  if (!isPartnerAuthed()) redirect("/partner/login");
 }
 
-/** パスワードが設定済みか (管理画面のセットアップ案内用。公開画面では出さない)。 */
+/** パスワードが設定済みか (管理画面の案内・ログイン失敗理由の切り分け用)。 */
 export async function partnerConfigured(): Promise<boolean> {
   return !!(await partnerPassword());
 }

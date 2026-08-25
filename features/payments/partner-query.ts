@@ -45,19 +45,30 @@ export function filterByContractMonth(rows: PartnerRow[], month: string): Partne
   return rows.filter((r) => r.contractDate.slice(0, 7) === month);
 }
 
-/** エントリー済みの案件をすべて取得する (月別タブも作れるよう絞り込みはしない)。 */
+/** エントリー済みの案件をすべて取得する (月別タブも作れるよう絞り込みはしない)。
+ *
+ *  取得に失敗した場合はエラーを投げずに notReady で返す。
+ *  外部企業の画面をエラーページにしない (原因も分からないまま問い合わせが来るため)。 */
 export async function loadPartnerBoard(): Promise<PartnerBoard> {
-  const svc = createSupabaseService();
-  const { data, error } = await svc
-    .from("payment_contracts")
-    .select("id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
-    .not("entered_at", "is", null)
-    .order("started_at", { ascending: true });
+  const notReady: PartnerBoard = { rows: [], months: [], notReady: true };
 
-  if (error) {
-    // 列が無い環境 (p004 未適用) は「準備中」として空で返す。外部企業にエラーは見せない。
-    console.error("[partner] query failed:", error.message);
-    return { rows: [], months: [], notReady: true };
+  let data: any[] | null = null;
+  try {
+    const svc = createSupabaseService();     // 環境変数が未設定だとここで throw する
+    const res = await svc
+      .from("payment_contracts")
+      .select("id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
+      .not("entered_at", "is", null)
+      .order("started_at", { ascending: true });
+    if (res.error) {
+      // entered_at 列が無い (p004 未適用) 等
+      console.error("[partner] query failed:", res.error.message);
+      return notReady;
+    }
+    data = res.data;
+  } catch (e: any) {
+    console.error("[partner] query threw:", String(e?.message ?? e));
+    return notReady;
   }
 
   const all = data ?? [];

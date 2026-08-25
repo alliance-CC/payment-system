@@ -17,10 +17,15 @@ export default function PartnerLoginPage({ searchParams }: { searchParams: { e?:
           <p className="text-xs text-muted">ご提供先さま専用ページ</p>
         </header>
 
-        {/* パスワード未設定かどうかは公開画面には出さない (総当たりの手掛かりにしない)。
-            設定の案内は管理画面の課金設定に置いてある。 */}
         <form action={partnerLoginAction} className="card p-6 space-y-4">
-          {searchParams.e && <p className="text-sm text-bad">パスワードが違います。</p>}
+          {searchParams.e === "1" && <p className="text-sm text-bad">パスワードが違います。</p>}
+          {/* 未設定のときは入力ミスと切り分けられるようにする
+              (パスワード自体の手掛かりにはならないため公開画面に出してよい) */}
+          {searchParams.e === "2" && (
+            <p className="text-sm text-bad">
+              ただいまご利用いただけません。担当者までお問い合わせください。
+            </p>
+          )}
           <div>
             <div className="label mb-1">パスワード</div>
             <input
