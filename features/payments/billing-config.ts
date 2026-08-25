@@ -137,6 +137,19 @@ export function firstChargeDate(signupDate: string, freeMonths: number, day = 1)
 }
 
 /**
+ * 「課金開始日」= 初回に課金される日。管理ボードの表示・エントリーCSV・
+ * 申込時の next_charge_date すべてでこの規則を使う (表示ごとに食い違わせない)。
+ *
+ * basis は利用開始日 (未記録なら申込日)。
+ * 注意: 契約行の next_charge_date は課金のたびに翌月へ進むので、
+ *       「課金開始日」として使ってはいけない (課金後の再出力で値がずれる)。
+ */
+export function chargeStartDateFrom(basis: string, freeMonths: number, chargeDay: number): string {
+  if (!basis) return "";
+  return freeMonths > 0 ? firstChargeDate(basis, freeMonths, chargeDay) : basis;
+}
+
+/**
  * date が属する月の末日 (YYYY-MM-DD)。解約時の「退会手続き当月末日24時まで利用可」
  * (§規約 有効期間 3) の利用可能期限に使う。
  */

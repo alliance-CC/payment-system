@@ -24,16 +24,19 @@ export async function GET(req: Request) {
   }
 
   // 課金の前に、放置された 3DS 申込を片付ける (/api/payments/cron/mpi-sweep と同じ処理)。
-  // 専用の cron を持たせず日次課金に相乗りさせているのは Vercel Hobby の制限
-  // (cron は2本まで・日次のみ) のため。Pro なら mpi-sweep を毎時で回すほうが復旧が早い。
-  // スイープ自身が実行時間バジェット (45s) を持ち、課金側の 240s と合わせても
-  // maxDuration=300s に収まる。失敗しても課金は実行する (片付けは翌日に持ち越せる)。
+  // ① 課金を先に実行する。
+  //    実行時間の上限に当たったとき、後回しにできるのは片付け (sweep) のほうで、
+  //    課金は当日中に済ませたい。スイープを先に回すと、そこで時間を使い切った場合に
+  //    その日の課金が丸ごと流れてしまうため、順序は入れ替えないこと。
+  const summary = await runDailyCharges();
+  // ② 放置された 3DS 申込の片付け (/api/payments/cron/mpi-sweep と同じ処理)。
+  //    専用の cron を持たせず日次課金に相乗りさせている。
+  //    失敗しても課金の結果には影響しない (片付けは翌日に持ち越せる)。
   const sweep = await sweepAbandoned3ds().catch((e: any) => {
     console.error("[payments/cron] 3ds sweep failed:", String(e?.message ?? e));
     return null;
   });
 
-  const summary = await runDailyCharges();
   // 運用ログ (Vercel の Cron 実行ログから確認できる)
   console.log("[payments/cron]", JSON.stringify({ ...summary, sweep }));
   return NextResponse.json({ ...summary, sweep });

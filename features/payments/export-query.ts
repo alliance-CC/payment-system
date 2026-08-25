@@ -6,6 +6,7 @@ import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap, getLicenseKeyMap } from "./store";
 import { formatPhoneJp } from "./phone";
+import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom } from "./billing-config";
 
 export type EntryExportRow = {
   accountId: string;
@@ -101,15 +102,22 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
 
   const ids = rows.map((r: any) => r.id);
   // 利用開始日(p001)・ライセンスキー(p002) は列が無い環境でも落とさない (空で出力)
-  const [ssMap, lkMap] = await Promise.all([getServiceStartMap(ids), getLicenseKeyMap(ids)]);
+  const [ssMap, lkMap, policy] = await Promise.all([
+    getServiceStartMap(ids), getLicenseKeyMap(ids), loadBillingPolicy(),
+  ]);
 
   return rows.map((r: any) => {
     const { last, first } = splitName(r.contact_name);
+    const applied = jstDate(r.started_at);
+    // 利用開始日: 選択値があればそれ、無ければ申込日の翌月1日 (管理ボードと同じ規則)
+    const serviceStart = ssMap.get(r.id) || (applied ? firstChargeDate(applied, 1) : "");
     return {
       accountId: r.account_id ?? "",
       licenseKey: lkMap.get(r.id) ?? "",
       serviceStartDate: ssMap.get(r.id) ?? "",
-      chargeStartDate: r.next_charge_date ?? "",
+      // next_charge_date は課金のたびに翌月へ進むため使わない。
+      // 課金済みの案件を再出力したときに「課金開始日」がずれてしまう。
+      chargeStartDate: chargeStartDateFrom(serviceStart, policy.freeMonths, policy.chargeDay),
       lastNameKanji: last,
       firstNameKanji: first,
       mobilePhone: formatPhoneJp(r.contact_phone),   // 先方へはハイフン付きで統一
