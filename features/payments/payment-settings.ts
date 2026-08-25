@@ -30,6 +30,14 @@ export type PaymentSettings = {
     remaining: number;  // total - used
     checkedAt: string;  // 集計時刻 (ISO)
   } | null;
+
+  // --- 外部企業向けダッシュボード (/partner) ---
+  /**
+   * 外部企業へ渡すログインパスワード。管理画面で発行し、そのままコピーして共有する。
+   * 未設定なら /partner には誰も入れない。変更すると発行済みのセッションは無効になる。
+   * ⚠️ 共有ダッシュボード専用。VeriTrans の鍵など決済系の認証情報はここに入れないこと。
+   */
+  partnerPassword?: string | null;
 };
 
 const PROVIDER = "payment_settings";

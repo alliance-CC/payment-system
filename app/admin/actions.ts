@@ -206,6 +206,8 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
     // ここでは編集せず既存値を引き継ぐ (管理画面の保存で消さない)。
     signupSheetId: String(formData.get("signupSheetId") ?? "").trim() || null,
     licenseStock: (await loadPaymentSettings()).licenseStock ?? null,
+    // 外部企業向けダッシュボードのパスワード。空にすると /partner は閉鎖される。
+    partnerPassword: String(formData.get("partnerPassword") ?? "").trim() || null,
   };
   const res = await savePaymentSettings(settings);
   if (res.ok) redirect("/admin/settings?saved=1");
