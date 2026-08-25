@@ -239,11 +239,21 @@ function normalizeSheetDate(v: unknown): string {
   return m ? `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}` : s;
 }
 
+/** 解約タブに既に載っている内容 (未記録分の書き出しで重複を避けるために使う) */
+export type CancelSheetKeys = {
+  /** 「顧客ID|解約日(YYYY-MM-DD)」の組 */
+  pairs: Set<string>;
+  /** 解約日を日付として読み取れなかった行の顧客ID。
+   *  日付で突合できないので、この顧客は「記録済み」とみなして書き足さない
+   *  (シートの日付表記が想定外でも、重複行を作らないようにするための安全側の判定)。 */
+  unparsedIds: Set<string>;
+};
+
 /**
- * 解約タブに既に載っている「顧客ID|解約日」の組を返す (未記録分の書き出し用)。
+ * 解約タブの記録済みキーを読む。
  * 取得できない場合は null = 判定できないので書き出しは行わない (重複を作らない)。
  */
-export async function loadCancelSheetKeys(): Promise<Set<string> | null> {
+export async function loadCancelSheetKeys(): Promise<CancelSheetKeys | null> {
   try {
     const client = await getSheets();
     if (!client) return null;
@@ -252,12 +262,16 @@ export async function loadCancelSheetKeys(): Promise<Set<string> | null> {
       range: `${CANCEL_TAB}!A1:D100000`,
     });
     const rows: any[][] = res?.data?.values ?? [];
-    const keys = new Set<string>();
+    const pairs = new Set<string>();
+    const unparsedIds = new Set<string>();
     for (let i = 1; i < rows.length; i++) {          // 1行目は見出し
       const id = String(rows[i]?.[0] ?? "").trim();
-      if (id) keys.add(`${id}|${normalizeSheetDate(rows[i]?.[3])}`);
+      if (!id) continue;
+      const date = normalizeSheetDate(rows[i]?.[3]);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) pairs.add(`${id}|${date}`);
+      else unparsedIds.add(id);
     }
-    return keys;
+    return { pairs, unparsedIds };
   } catch (e: any) {
     console.error("[entry-sheet] cancel keys read failed:", String(e?.message ?? e));
     return null;

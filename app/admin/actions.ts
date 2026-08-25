@@ -58,17 +58,23 @@ export async function cancelAction(formData: FormData): Promise<void> {
       : {}));
 }
 
-// 連携スプレッドシート「解約」タブの未記録分をまとめて書き出す (課金設定のボタン)。
-// タブ名の相違や一時的な障害で書けていなかった解約を回収する。
-// 既に載っている「顧客ID + 解約日」は書かないので、何度押しても重複しない。
+// 解約の記録漏れをまとめて補う (課金設定のボタン)。
+//   ・エントリータブの「退会日」を全ての解約済み案件について埋め直す
+//   ・解約タブに載っていない解約だけを追記する
+// 既に載っている分は書かないので、何度押しても重複しない。
 export async function backfillCancelSheetAction(): Promise<void> {
   requireAdmin();
   const { backfillCancelSheet } = await import("@/features/payments/billing");
   const r = await backfillCancelSheet().catch((e: any) => ({
-    ok: false, written: 0, skipped: 0, error: String(e?.message ?? e),
+    ok: false, written: 0, skipped: 0, withdrawalFilled: 0, error: String(e?.message ?? e),
   }));
 
-  const q = new URLSearchParams({ bf: r.ok ? "1" : "0", bfw: String(r.written), bfs: String(r.skipped) });
+  const q = new URLSearchParams({
+    bf: r.ok ? "1" : "0",
+    bfw: String(r.written),
+    bfs: String(r.skipped),
+    bfd: String(r.withdrawalFilled),
+  });
   if (!r.ok && r.error) q.set("bferr", r.error.slice(0, 200));
   redirect(`/admin/settings?${q.toString()}`);
 }

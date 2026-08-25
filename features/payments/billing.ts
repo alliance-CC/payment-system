@@ -1403,34 +1403,52 @@ export async function cancelSubscription(accountId: string): Promise<{
 }
 
 /**
- * 解約タブに載っていない解約を、あとからまとめて書き出す (管理画面の「未記録分を書き出す」)。
+ * 解約の記録漏れを、あとからまとめて補う (管理画面の「解約の記録漏れを補う」)。
  *
- * タブ名の相違や一時的な障害で書き込みに失敗していた分を回収するためのもの。
- * 既に載っている「顧客ID + 解約日」は書かないので、何度実行しても重複しない。
+ * 2つを行う:
+ *   ・エントリータブ I列「退会日」を埋める … 解約時に後追い記入する仕組みを入れる前に
+ *     解約した案件は空欄のままなので、全ての解約済み案件に対して毎回書き直す
+ *     (同じ値を上書きするだけなので何度実行しても害はない)
+ *   ・解約タブに無い解約を追記する … 通常は解約時に書けているので何もしない。
+ *     タブ名の相違や一時的な障害で書けなかった分だけが対象になる
+ *
+ * 重複防止: 既に載っている「顧客ID + 解約日」は書かない。
+ * シートの日付表記が想定外で読み取れない行は、その顧客を記録済みとみなして書き足さない
+ * (突合できない状態で書くと重複行を作ってしまうため、安全側に倒す)。
  */
 export async function backfillCancelSheet(): Promise<{
-  ok: boolean; written: number; skipped: number; error?: string;
+  ok: boolean; written: number; skipped: number; withdrawalFilled: number; error?: string;
 }> {
+  const empty = { written: 0, skipped: 0, withdrawalFilled: 0 };
   const existing = await loadCancelSheetKeys();
   if (existing === null) {
-    return { ok: false, written: 0, skipped: 0, error: "解約タブを読めませんでした（シートの共有設定・タブ名をご確認ください）" };
+    return { ok: false, ...empty, error: "解約タブを読めませんでした（シートの共有設定・タブ名をご確認ください）" };
   }
 
   let contracts: ContractRow[];
   try {
     contracts = await listCanceledContracts();
   } catch (e: any) {
-    return { ok: false, written: 0, skipped: 0, error: String(e?.message ?? e) };
+    return { ok: false, ...empty, error: String(e?.message ?? e) };
   }
 
   const ssMap = await getServiceStartMap(contracts.map((c) => c.id)).catch(() => new Map());
   let written = 0;
   let skipped = 0;
+  let withdrawalFilled = 0;
 
   for (const c of contracts) {
     const canceledDate = jstDateOf(c.canceled_at ?? null);
     if (!canceledDate) { skipped++; continue; }
-    if (existing.has(`${c.account_id}|${canceledDate}`)) { skipped++; continue; }
+
+    // ① エントリー行の退会日は、解約タブの状態に関わらず必ず埋め直す
+    const filled = await updateEntryWithdrawalDate(c.account_id, canceledDate)
+      .then(() => true).catch(() => false);
+    if (filled) withdrawalFilled++;
+
+    // ② 解約タブは「無いものだけ」追記する
+    if (existing.pairs.has(`${c.account_id}|${canceledDate}`)
+      || existing.unparsedIds.has(c.account_id)) { skipped++; continue; }
 
     const res = await appendCancelRow({
       customerId: c.account_id,
@@ -1441,15 +1459,13 @@ export async function backfillCancelSheet(): Promise<{
     });
     if (!res.ok) {
       return {
-        ok: false, written, skipped,
+        ok: false, written, skipped, withdrawalFilled,
         error: res.reason === "disabled" ? "連携スプレッドシートが未設定です" : res.error,
       };
     }
-    existing.add(`${c.account_id}|${canceledDate}`);   // 同一実行内での二重書き込みも防ぐ
+    existing.pairs.add(`${c.account_id}|${canceledDate}`);   // 同一実行内での二重書き込みも防ぐ
     written++;
-    // 退会日がエントリー行に入っていない分もついでに埋める
-    await updateEntryWithdrawalDate(c.account_id, canceledDate).catch(() => {});
   }
 
-  return { ok: true, written, skipped };
+  return { ok: true, written, skipped, withdrawalFilled };
 }
