@@ -26,9 +26,11 @@ export default async function PartnerDashboardPage({
   const view = await loadPartnerBoard();
 
   // 既定は最新の月。month=all を指定すると全期間。
-  const showAll = searchParams.month === "all";
+  // データが1件も無いときは対象月が決まらないので、全期間として扱う
+  // (どのタブも選択されていない中途半端な表示にしない)。
   const requested = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : "";
-  const month = showAll ? "" : requested || view.months[0] || "";
+  const month = searchParams.month === "all" ? "" : requested || view.months[0] || "";
+  const showAll = !month;
 
   const rows = filterByContractMonth(view.rows, month);
   const canceled = rows.filter((r) => r.withdrawalDate).length;
@@ -44,7 +46,7 @@ export default async function PartnerDashboardPage({
             <p className="text-xs text-muted">ご登録が完了したご契約者さまの一覧（月別）</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href={href(showAll ? "all" : month)} className="btn flex items-center gap-1">
+            <Link href={href(month || "all")} className="btn flex items-center gap-1">
               <RefreshCw size={14} />更新
             </Link>
             <form action={partnerLogoutAction}>
@@ -83,9 +85,7 @@ export default async function PartnerDashboardPage({
 
             {/* 件数サマリ */}
             <div className="card p-3 flex flex-wrap items-center gap-4 text-sm">
-              <span className="text-muted">
-                {showAll ? "全期間" : month ? monthLabel(month) : "—"}
-              </span>
+              <span className="text-muted">{showAll ? "全期間" : monthLabel(month)}</span>
               <span className="text-muted ml-auto">件数 <b className="text-ink">{rows.length}</b></span>
               <span className="text-muted">うち退会 <b className="text-ink">{canceled}</b></span>
             </div>

@@ -11,6 +11,9 @@ import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap } from "./store";
 import { firstChargeDate } from "./billing-config";
 
+/** 1回のクエリで読む行数。Supabase 既定の上限 (1000) に合わせる。 */
+const PAGE = 1000;
+
 export type PartnerRow = {
   customerName: string;     // お客様名
   contractDate: string;     // ご契約日 (= 申込日)
@@ -52,26 +55,32 @@ export function filterByContractMonth(rows: PartnerRow[], month: string): Partne
 export async function loadPartnerBoard(): Promise<PartnerBoard> {
   const notReady: PartnerBoard = { rows: [], months: [], notReady: true };
 
-  let data: any[] | null = null;
+  const all: any[] = [];
   try {
     const svc = createSupabaseService();     // 環境変数が未設定だとここで throw する
-    const res = await svc
-      .from("payment_contracts")
-      .select("id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
-      .not("entered_at", "is", null)
-      .order("started_at", { ascending: true });
-    if (res.error) {
-      // entered_at 列が無い (p004 未適用) 等
-      console.error("[partner] query failed:", res.error.message);
-      return notReady;
+    // Supabase は1リクエストの返却行数に上限 (既定1000) があり、超えると黙って
+    // 切り捨てられる。件数が増えても取りこぼさないようページングして全件読む。
+    for (let from = 0; ; from += PAGE) {
+      const res = await svc
+        .from("payment_contracts")
+        .select("id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
+        .not("entered_at", "is", null)
+        .order("started_at", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (res.error) {
+        // entered_at 列が無い (p004 未適用) 等
+        console.error("[partner] query failed:", res.error.message);
+        return notReady;
+      }
+      const page = res.data ?? [];
+      all.push(...page);
+      if (page.length < PAGE) break;
     }
-    data = res.data;
   } catch (e: any) {
     console.error("[partner] query threw:", String(e?.message ?? e));
     return notReady;
   }
 
-  const all = data ?? [];
   const ssMap = await getServiceStartMap(all.map((r: any) => r.id)).catch(() => new Map());
 
   const rows: PartnerRow[] = all.map((r: any) => {

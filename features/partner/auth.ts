@@ -29,13 +29,24 @@ export async function partnerPassword(): Promise<string> {
   return String(process.env.PARTNER_PASSWORD ?? "").trim();
 }
 
-/** Cookie に入れる署名トークン。パスワードそのものは保存しない。 */
-export function partnerSessionToken(): string {
-  const secret =
+/** セッション Cookie の署名鍵。どれも未設定なら空 (= セッションを発行しない)。 */
+function sessionSecret(): string {
+  return (
     process.env.PARTNER_SESSION_SECRET ||
     process.env.ADMIN_SESSION_SECRET ||
     process.env.ADMIN_PASSWORD ||
-    "memoreal-partner";
+    ""
+  );
+}
+
+/**
+ * Cookie に入れる署名トークン。パスワードそのものは保存しない。
+ * 署名鍵が無い場合は空文字を返す — 固定の既定値で署名すると、
+ * ソースを知る者が Cookie を偽造できてしまうため、鍵が無いときは誰も通さない。
+ */
+export function partnerSessionToken(): string {
+  const secret = sessionSecret();
+  if (!secret) return "";
   return createHmac("sha256", secret).update("pay-partner-session-v1").digest("hex");
 }
 
@@ -55,8 +66,15 @@ export async function verifyPartnerPassword(input: string): Promise<boolean> {
 
 /** ログイン済みか。Cookie の署名照合のみ (DBアクセス無し)。 */
 export function isPartnerAuthed(): boolean {
+  const token = partnerSessionToken();
+  if (!token) return false;                    // 署名鍵が無ければ誰も通さない
   const c = cookies().get(PARTNER_COOKIE)?.value;
-  return !!c && safeEqual(c, partnerSessionToken());
+  return !!c && safeEqual(c, token);
+}
+
+/** ログインを受け付けられる状態か (パスワードと署名鍵が両方そろっている)。 */
+export async function partnerLoginReady(): Promise<boolean> {
+  return !!sessionSecret() && !!(await partnerPassword());
 }
 
 /** 保護ページの先頭で呼ぶ。未認証なら /partner/login へ。 */
