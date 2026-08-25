@@ -1,7 +1,7 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap, getLicenseKeyMap, getEnteredMap } from "./store";
-import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
+import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom, todayJst } from "./billing-config";
 import {
   filterByScope, filterByStatus, filterByQuery, isAppliedIn, isEntryTodo, type BoardScope,
 } from "./admin-filter";
@@ -109,11 +109,9 @@ export async function loadBoard(
     // 利用開始日: 選択値があればそれ、無ければ申込日の翌月1日を推定
     const chosen = ssMap.get(c.id) || null;
     const serviceStart = chosen ?? (applied ? firstChargeDate(applied, 1) : "");
-    // 課金開始日: 利用開始日 + freeMonths の1日 (無料期間0なら利用開始日)
-    const chargeBasis = chosen ?? applied;
-    const chargeStart = chargeBasis
-      ? (policy.freeMonths > 0 ? firstChargeDate(chargeBasis, policy.freeMonths, policy.chargeDay) : chargeBasis)
-      : "";
+    // 課金開始日: 利用開始日 + freeMonths の1日 (無料期間0なら利用開始日)。
+    // CSV出力・申込時の next_charge_date と同じ関数を使い、表示が食い違わないようにする。
+    const chargeStart = chargeStartDateFrom(chosen ?? applied, policy.freeMonths, policy.chargeDay);
     const canceledAt = c.canceled_at ? jstDate(c.canceled_at) : null;
 
     // 状況ラベル。「申込未完了」は利用開始日より優先する — 決済登録が済んでいない契約を
