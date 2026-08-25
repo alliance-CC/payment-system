@@ -88,7 +88,10 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
   const { gte, lt } = jstRangeToUtc(from, to);
   const { data, error } = await svc
     .from("payment_contracts")
-    .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at")
+    .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
+    // 解約済みは新規エントリーとして渡さない。解約は解約CSV(解約日軸)の担当。
+    // これを入れないと、申込月を後から出力し直したときに解約者まで新規として並ぶ。
+    .is("canceled_at", null)
     .gte("started_at", gte)
     .lt("started_at", lt)
     .order("started_at", { ascending: true });

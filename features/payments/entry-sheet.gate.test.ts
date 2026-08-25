@@ -86,7 +86,7 @@ vi.mock("./entry-sheet", async (importOriginal) => {
       if (mem.entries.some((e) => e.customerId === row.customerId)) return "duplicate";
       mem.entries.push(row); return "written";
     },
-    appendCancelRow: async () => {},
+    appendCancelRow: async () => ({ ok: true }),
     assignLicenseKey: async (accountId: string) => {
       mem.licenses.push(accountId); return `KEY-${mem.licenses.length}`;
     },

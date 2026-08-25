@@ -73,6 +73,7 @@ export default async function AdminBoardPage({
     month?: string; scope?: string; status?: string; q?: string;
     del?: string; plan?: string; testcharge?: string; code?: string;
     select?: string; entry?: string; n?: string; eerr?: string;
+    cancel?: string; cerr?: string;
   };
 }) {
   requireAdmin();
@@ -179,6 +180,16 @@ export default async function AdminBoardPage({
         {testRes && testMsg[testRes] && (
           <div className={"card p-3 text-sm " + (testMsg[testRes].ok ? "text-good" : "text-bad")}>
             {testMsg[testRes].text}
+          </div>
+        )}
+        {/* 解約はできたが連携スプレッドシートに書けなかった場合の警告 */}
+        {searchParams.cancel === "nosheet" && (
+          <div className="card p-3 text-sm text-bad">
+            解約は完了しましたが、連携スプレッドシートの「解約」タブに記録できませんでした。
+            {searchParams.cerr ? <span className="block mt-1 font-mono text-xs break-all">理由: {searchParams.cerr}</span> : null}
+            <span className="block mt-1">
+              シートの共有設定とタブ名をご確認のうえ、課金設定の「解約タブの未記録分を書き出す」で復旧できます。
+            </span>
           </div>
         )}
         {/* エントリー済みチェックの結果通知 */}
