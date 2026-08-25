@@ -5,6 +5,8 @@ import { loadPlans } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } from "@/features/payments/payment-settings";
 import { saveSettingsAction, testSheetAction, testMailAction } from "../actions";
+import PartnerAccessPanel from "./PartnerAccessPanel";
+import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "課金設定 | Memoreal Payments" };
@@ -25,6 +27,13 @@ export default async function SettingsPage({ searchParams }: {
   const welcomeSubject = raw.welcomeEmail?.subject || DEFAULT_WELCOME_SUBJECT;
   const welcomeBody = raw.welcomeEmail?.body || DEFAULT_WELCOME_BODY;
   const stock = raw.licenseStock ?? null;   // ② 毎朝9時の Cron が更新する在庫集計
+
+  // 外部企業へ渡すダッシュボードURL。NEXT_PUBLIC_APP_URL があればそれを使い、
+  // 未設定ならこの画面を開いているホストから組み立てる (設定漏れでも正しいURLが出る)。
+  const h = headers();
+  const origin = (process.env.NEXT_PUBLIC_APP_URL ?? "").trim().replace(/\/$/, "")
+    || `${h.get("x-forwarded-proto") ?? "https"}://${h.get("host") ?? ""}`;
+  const partnerUrl = `${origin}/partner`;
   // 追加入力用の空行を3つ確保
   const rows = [...plans, ...Array(3).fill(null)].slice(0, Math.max(plans.length + 2, 4));
 
@@ -214,6 +223,18 @@ export default async function SettingsPage({ searchParams }: {
                 <p className="text-sm text-muted">未集計（毎朝9時に自動集計します）</p>
               )}
             </div>
+          </section>
+
+          {/* 外部企業向けダッシュボード */}
+          <section className="card p-4 space-y-3">
+            <h2 className="font-semibold text-navy text-sm">外部企業向けダッシュボード</h2>
+            <p className="text-[11px] text-muted">
+              管理ボードで「エントリー済み」にした案件を、月別で外部企業へ共有します。
+              表示項目は <b>お客様名 / ご契約日 / ご利用開始日 / 退会日 / ご加入サービス名</b> の5つのみで、
+              会員ID・電話番号・メール・ライセンスキー・金額・課金状況は表示されません。
+              下のURLとパスワードをコピーして先方へお渡しください。
+            </p>
+            <PartnerAccessPanel dashboardUrl={partnerUrl} initialPassword={raw.partnerPassword ?? ""} />
           </section>
 
           {/* 登録完了メール (利用者宛) */}
