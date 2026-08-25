@@ -370,11 +370,19 @@ export default async function AdminBoardPage({
                 <tr key={r.accountId} className={"border-b border-border/60 " + (r.billingAlert ? "bg-bad/5" : "")}>
                   {selectMode && (
                     <td className="px-3 py-2">
-                      {/* 行内の他フォームと入れ子にならないよう form 属性で保存先を指定する */}
-                      <input
-                        type="checkbox" name="accountIds" value={r.accountId} form={MARK_FORM_ID}
-                        aria-label={`${r.accountId} を選択`}
-                      />
+                      {/* エントリーの対象になり得る行だけ選べるようにする。
+                          申込未完了・解約(未エントリー)にチェックを付けられると、
+                          「すべて選択」で誤って外部ダッシュボードに載ってしまうため。
+                          既にエントリー済みの行は、取り消せるよう常に選べる。 */}
+                      {r.enteredAt || r.statusLabel === "利用前" || r.statusLabel === "利用中" ? (
+                        // 行内の他フォームと入れ子にならないよう form 属性で保存先を指定する
+                        <input
+                          type="checkbox" name="accountIds" value={r.accountId} form={MARK_FORM_ID}
+                          aria-label={`${r.accountId} を選択`}
+                        />
+                      ) : (
+                        <span className="text-muted" title="エントリーの対象外です">—</span>
+                      )}
                     </td>
                   )}
                   <td className="px-3 py-2 text-muted">{r.appliedAt}</td>

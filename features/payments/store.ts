@@ -52,46 +52,47 @@ export async function updateLicenseKey(id: string, key: string | null): Promise<
   } catch { /* 列が無ければ黙って無視 (シート側には付与済みの記録が残る) */ }
 }
 
-/** contract_id → ライセンスキー のマップをベストエフォートで取得 (列 p002 未適用なら空)。 */
-export async function getLicenseKeyMap(ids: string[]): Promise<Map<string, string | null>> {
+/**
+ * 追加列 (p001/p002/p004) を contract_id 単位で引く共通処理。
+ *
+ * ・.in() は id をURLに並べるため、件数が増えるとURL長の上限に当たる。
+ *   200件ずつに分けて問い合わせる (1件あたり36文字のUUIDでも約7KB)。
+ * ・列が無い環境ではエラーになるが、そのときは空マップを返して表示だけ諦める
+ *   (申込・課金は列が無くても動く)。
+ */
+async function getContractColumnMap(
+  ids: string[],
+  column: string,
+): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
   if (!ids.length) return map;
+  const CHUNK = 200;
   try {
     const service = createSupabaseService();
-    const { data, error } = await service
-      .from("payment_contracts").select("id, license_key").in("id", ids);
-    if (error) return map;
-    for (const r of data ?? []) map.set((r as any).id, (r as any).license_key ?? null);
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const { data, error } = await service
+        .from("payment_contracts").select(`id, ${column}`).in("id", ids.slice(i, i + CHUNK));
+      if (error) return map;        // 列が無い等。取得できた分も使わない (中途半端に混ぜない)
+      for (const r of data ?? []) map.set((r as any).id, (r as any)[column] ?? null);
+    }
   } catch { /* 列が無ければ空マップ */ }
   return map;
+}
+
+/** contract_id → ライセンスキー のマップをベストエフォートで取得 (列 p002 未適用なら空)。 */
+export async function getLicenseKeyMap(ids: string[]): Promise<Map<string, string | null>> {
+  return getContractColumnMap(ids, "license_key");
 }
 
 /** contract_id → 利用開始日 のマップをベストエフォートで取得 (列 p001 未適用なら空)。 */
 export async function getServiceStartMap(ids: string[]): Promise<Map<string, string | null>> {
-  const map = new Map<string, string | null>();
-  if (!ids.length) return map;
-  try {
-    const service = createSupabaseService();
-    const { data, error } = await service
-      .from("payment_contracts").select("id, service_start_date").in("id", ids);
-    if (error) return map;
-    for (const r of data ?? []) map.set((r as any).id, (r as any).service_start_date ?? null);
-  } catch { /* 列が無ければ空マップ */ }
-  return map;
+  return getContractColumnMap(ids, "service_start_date");
 }
 
-/** contract_id → エントリー済み日時 のマップをベストエフォートで取得 (列 p004 未適用なら空)。 */
+/** contract_id → エントリー済み日時 のマップをベストエフォートで取得
+ *  (列 p004 未適用なら空 = 全件「未エントリー」表示になる)。 */
 export async function getEnteredMap(ids: string[]): Promise<Map<string, string | null>> {
-  const map = new Map<string, string | null>();
-  if (!ids.length) return map;
-  try {
-    const service = createSupabaseService();
-    const { data, error } = await service
-      .from("payment_contracts").select("id, entered_at").in("id", ids);
-    if (error) return map;
-    for (const r of data ?? []) map.set((r as any).id, (r as any).entered_at ?? null);
-  } catch { /* 列が無ければ空マップ (全件「未エントリー」表示になる) */ }
-  return map;
+  return getContractColumnMap(ids, "entered_at");
 }
 
 /**
