@@ -23,7 +23,7 @@ export default async function SettingsPage({ searchParams }: {
     // 外部ダッシュボードのパスワード保存結果 (savePartnerPasswordAction からのクエリ)
     partner?: string; perr?: string;
     // 解約タブの未記録分の書き出し結果 (backfillCancelSheetAction からのクエリ)
-    bf?: string; bfw?: string; bfs?: string; bferr?: string;
+    bf?: string; bfw?: string; bfs?: string; bfd?: string; bferr?: string;
   };
 }) {
   requireAdmin();
@@ -233,19 +233,23 @@ export default async function SettingsPage({ searchParams }: {
             <div className="rounded-lg border border-border p-3 space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
-                  <div className="label">解約タブの未記録分を書き出す</div>
+                  <div className="label">解約の記録漏れを補う</div>
                   <p className="text-[10px] text-muted">
-                    解約済みなのに「解約」タブに載っていない案件をまとめて追記します。
+                    エントリータブの「退会日」を解約済みの全案件について埋め直し、
+                    「解約」タブに載っていない解約があれば追記します。
                     既にある行（顧客ID＋解約日が同じ）は書かないので、何度押しても重複しません。
                   </p>
                 </div>
                 <button formAction={backfillCancelSheetAction} formNoValidate className="btn text-xs py-1">
-                  未記録分を書き出す
+                  記録漏れを補う
                 </button>
               </div>
               {searchParams.bf === "1" && (
                 <div className="text-[12px] text-good">
-                  ✅ {searchParams.bfw} 件を追記しました（記録済みのため書かなかったもの: {searchParams.bfs} 件）
+                  ✅ 退会日を {searchParams.bfd} 件に記入しました
+                  {searchParams.bfw && searchParams.bfw !== "0"
+                    ? ` — 解約タブに ${searchParams.bfw} 件を追記（記録済みのため書かなかったもの: ${searchParams.bfs} 件）`
+                    : "（解約タブは全て記録済みでした）"}
                 </div>
               )}
               {searchParams.bf === "0" && (

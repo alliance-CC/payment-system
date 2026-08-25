@@ -188,7 +188,7 @@ export default async function AdminBoardPage({
             解約は完了しましたが、連携スプレッドシートの「解約」タブに記録できませんでした。
             {searchParams.cerr ? <span className="block mt-1 font-mono text-xs break-all">理由: {searchParams.cerr}</span> : null}
             <span className="block mt-1">
-              シートの共有設定とタブ名をご確認のうえ、課金設定の「解約タブの未記録分を書き出す」で復旧できます。
+              シートの共有設定とタブ名をご確認のうえ、課金設定の「解約の記録漏れを補う」で復旧できます。
             </span>
           </div>
         )}
