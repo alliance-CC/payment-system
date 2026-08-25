@@ -46,7 +46,10 @@ function safeEqual(a: string, b: string): boolean {
 export async function verifyPartnerPassword(input: string): Promise<boolean> {
   const pw = await partnerPassword();
   if (!pw) return false;                       // 未設定なら不許可
-  return safeEqual(String(input ?? ""), pw);
+  // 保存時に trim しているので照合側も trim する。
+  // コピー&ペーストで前後に空白や改行が付くことがあり、それだけで弾かれると
+  // 「パスワードが違います」の原因が外部企業側からは分からないため。
+  return safeEqual(String(input ?? "").trim(), pw);
 }
 
 export async function isPartnerAuthed(): Promise<boolean> {

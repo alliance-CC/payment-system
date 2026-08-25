@@ -214,6 +214,21 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   redirect(`/admin/settings?saved=0&err=${encodeURIComponent(res.error ?? "unknown")}`);
 }
 
+// 外部企業向けダッシュボードのパスワードだけを保存する
+// (課金設定のパネル内「このパスワードを保存」ボタン)。
+//   ・patchPaymentSettings なのでプラン等の他の設定は触らない
+//   ・画面下の「保存」まで行かなくても、その場で確定できるようにするためのもの
+//     (発行しただけで保存を忘れると、渡したパスワードでログインできない)
+export async function savePartnerPasswordAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const pw = String(formData.get("partnerPassword") ?? "").trim();
+  const res = await patchPaymentSettings({ partnerPassword: pw || null });
+
+  const q = new URLSearchParams({ partner: res.ok ? (pw ? "1" : "off") : "0" });
+  if (!res.ok && res.error) q.set("perr", res.error.slice(0, 200));
+  redirect(`/admin/settings?${q.toString()}`);
+}
+
 // 連携スプレッドシートの接続テスト (管理画面の「接続テスト」ボタン)。
 // サービスアカウントで開けるか・必要なタブがあるか・書き込めるか・在庫数 を確認し、
 // 結果をクエリに載せて設定画面へ戻す。ついでに在庫集計を保存する
