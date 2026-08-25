@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
-import { Copy, Check, RefreshCw, Eye, EyeOff } from "lucide-react";
+import { savePartnerPasswordAction } from "../actions";
+import { Copy, Check, RefreshCw, Eye, EyeOff, Save, AlertTriangle } from "lucide-react";
 
 // 外部企業向けダッシュボードの「渡す情報」パネル。
 // URL とパスワードをそのままコピーして先方へ共有できるようにする。
@@ -54,13 +55,21 @@ export default function PartnerAccessPanel({
   const [copied, setCopied] = useState(false);
 
   const weak = password.length > 0 && password.length < 12;
+  // 保存済みの値と違う = まだ保存されていない。
+  // 「発行してコピーしたのに保存を忘れた」状態だと、渡したパスワードでは入れないため明示する。
+  const dirty = password !== initialPassword;
 
   return (
     <div className="space-y-3">
       <CopyField label="ダッシュボードURL" value={dashboardUrl} />
 
       <div>
-        <div className="label mb-1">ログインパスワード</div>
+        <div className="label mb-1 flex items-center gap-2">
+          ログインパスワード
+          <span className={"chip " + (initialPassword ? "chip-good" : "chip-gold")}>
+            {initialPassword ? `保存済み（${initialPassword.length}文字）` : "未設定"}
+          </span>
+        </div>
         <div className="flex items-center gap-1.5">
           <input
             name="partnerPassword"
@@ -102,6 +111,24 @@ export default function PartnerAccessPanel({
             <RefreshCw size={12} />発行
           </button>
         </div>
+        {/* 保存しないと反映されないことが分かるようにする。
+            画面下の「保存」まで行かなくても、この場で確定できる。 */}
+        <div className="flex flex-wrap items-center gap-2 mt-2">
+          <button
+            type="submit"
+            formAction={savePartnerPasswordAction}
+            formNoValidate
+            className={"btn text-xs py-1 flex items-center gap-1 " + (dirty ? "btn-primary" : "")}
+          >
+            <Save size={12} />このパスワードを保存
+          </button>
+          {dirty && (
+            <span className="text-[11px] text-bad flex items-center gap-1">
+              <AlertTriangle size={12} />未保存です。保存するまで、このパスワードではログインできません。
+            </span>
+          )}
+        </div>
+
         {weak && (
           <p className="text-[11px] text-bad mt-1">
             短すぎます。「発行」で強いパスワードを作ることをおすすめします。

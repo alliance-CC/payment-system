@@ -18,6 +18,8 @@ export default async function SettingsPage({ searchParams }: {
     test?: string; terr?: string; ttitle?: string; ttabs?: string; tstock?: string;
     // メールのテスト送信結果 (testMailAction からのクエリ)
     mail?: string; merr?: string; mto?: string; mvia?: string;
+    // 外部ダッシュボードのパスワード保存結果 (savePartnerPasswordAction からのクエリ)
+    partner?: string; perr?: string;
   };
 }) {
   requireAdmin();
@@ -48,6 +50,23 @@ export default async function SettingsPage({ searchParams }: {
           <Link href="/admin" className="btn flex items-center gap-1"><ArrowLeft size={14} />一覧へ</Link>
         </header>
 
+        {searchParams.partner === "1" && (
+          <div className="card p-3 text-sm text-good">
+            外部ダッシュボードのパスワードを保存しました。このパスワードでログインできます
+            （変更前のパスワードでログイン中の方は再ログインが必要です）。
+          </div>
+        )}
+        {searchParams.partner === "off" && (
+          <div className="card p-3 text-sm text-bad">
+            パスワードを空にしたため、外部ダッシュボードは閉鎖されました（誰もログインできません）。
+          </div>
+        )}
+        {searchParams.partner === "0" && (
+          <div className="card p-3 text-sm text-bad">
+            外部ダッシュボードのパスワード保存に失敗しました。
+            {searchParams.perr ? <span className="block mt-1 font-mono text-xs break-all">理由: {searchParams.perr}</span> : null}
+          </div>
+        )}
         {searchParams.saved === "1" && <div className="card p-3 text-sm text-good">保存しました。以降の申込・課金に反映されます。</div>}
         {searchParams.saved === "0" && (
           <div className="card p-3 text-sm text-bad">
