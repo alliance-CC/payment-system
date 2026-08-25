@@ -4,7 +4,9 @@ import { requireAdmin } from "@/features/admin/auth";
 import { loadPlans } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } from "@/features/payments/payment-settings";
-import { saveSettingsAction, testSheetAction, testMailAction } from "../actions";
+import {
+  saveSettingsAction, testSheetAction, testMailAction, backfillCancelSheetAction,
+} from "../actions";
 import PartnerAccessPanel from "./PartnerAccessPanel";
 import { headers } from "next/headers";
 
@@ -20,6 +22,8 @@ export default async function SettingsPage({ searchParams }: {
     mail?: string; merr?: string; mto?: string; mvia?: string;
     // 外部ダッシュボードのパスワード保存結果 (savePartnerPasswordAction からのクエリ)
     partner?: string; perr?: string;
+    // 解約タブの未記録分の書き出し結果 (backfillCancelSheetAction からのクエリ)
+    bf?: string; bfw?: string; bfs?: string; bferr?: string;
   };
 }) {
   requireAdmin();
@@ -221,6 +225,33 @@ export default async function SettingsPage({ searchParams }: {
                   {searchParams.ttabs ? (
                     <div className="text-[11px] text-muted mt-0.5">見つかったタブ: {searchParams.ttabs}</div>
                   ) : null}
+                </div>
+              )}
+            </div>
+
+            {/* 解約タブの復旧: タブ名の相違や一時的な障害で書けなかった解約を後から回収する */}
+            <div className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <div className="label">解約タブの未記録分を書き出す</div>
+                  <p className="text-[10px] text-muted">
+                    解約済みなのに「解約」タブに載っていない案件をまとめて追記します。
+                    既にある行（顧客ID＋解約日が同じ）は書かないので、何度押しても重複しません。
+                  </p>
+                </div>
+                <button formAction={backfillCancelSheetAction} formNoValidate className="btn text-xs py-1">
+                  未記録分を書き出す
+                </button>
+              </div>
+              {searchParams.bf === "1" && (
+                <div className="text-[12px] text-good">
+                  ✅ {searchParams.bfw} 件を追記しました（記録済みのため書かなかったもの: {searchParams.bfs} 件）
+                </div>
+              )}
+              {searchParams.bf === "0" && (
+                <div className="text-[12px] text-bad">
+                  ❌ 書き出せませんでした
+                  {searchParams.bferr ? <div className="mt-0.5 break-all">{searchParams.bferr}</div> : null}
                 </div>
               )}
             </div>

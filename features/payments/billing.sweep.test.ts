@@ -70,7 +70,7 @@ vi.mock("./store", () => ({
 }));
 
 vi.mock("./entry-sheet", () => ({
-  appendEntryRow: async () => {}, appendCancelRow: async () => {}, assignLicenseKey: async () => null,
+  appendEntryRow: async () => {}, appendCancelRow: async () => ({ ok: true }), assignLicenseKey: async () => null,
 }));
 vi.mock("./crm-adapter", () => ({
   supabaseCrmAdapter: () => ({

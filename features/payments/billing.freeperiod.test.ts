@@ -117,7 +117,7 @@ vi.mock("./store", () => ({
 // ①②③ 連携スプレッドシート。未設定時は no-op だが、テストでは外部依存を持たせない
 vi.mock("./entry-sheet", () => ({
   appendEntryRow: async () => {},
-  appendCancelRow: async () => {},
+  appendCancelRow: async () => ({ ok: true }),
   assignLicenseKey: async () => null,
   updateEntryWithdrawalDate: async () => {},
 }));

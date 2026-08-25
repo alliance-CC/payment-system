@@ -209,16 +209,58 @@ export async function updateEntryWithdrawalDate(customerId: string, canceledDate
   }
 }
 
-/** ③ 解約を解約タブへ記録する (非ブロッキング) */
-export async function appendCancelRow(row: CancelSheetRow): Promise<void> {
+export type SheetWriteResult =
+  | { ok: true }
+  | { ok: false; reason: "disabled" }            // 連携が未設定 (シートID/認証情報なし)
+  | { ok: false; reason: "error"; error: string };
+
+/** ③ 解約を解約タブへ記録する (解約処理自体はブロックしない)。
+ *  書けなかった理由は呼び出し側へ返す — ここで握りつぶすと、解約したのに
+ *  シートに載っていないことに誰も気づけない。 */
+export async function appendCancelRow(row: CancelSheetRow): Promise<SheetWriteResult> {
   try {
     const client = await getSheets();
-    if (!client) return;
+    if (!client) return { ok: false, reason: "disabled" };
     await writeToFirstEmptyRow(client, CANCEL_TAB, [
       row.customerId, row.contractDate, row.serviceStartDate, row.canceledDate, row.serviceName,
     ]);
+    return { ok: true };
   } catch (e: any) {
-    console.error("[entry-sheet] cancel write failed:", String(e?.message ?? e));
+    const error = String(e?.message ?? e);
+    console.error("[entry-sheet] cancel write failed:", error);
+    return { ok: false, reason: "error", error };
+  }
+}
+
+/** シート上の日付表記 (2026/08/20 等) を YYYY-MM-DD に寄せる (突合用) */
+function normalizeSheetDate(v: unknown): string {
+  const s = String(v ?? "").trim();
+  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(s);
+  return m ? `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}` : s;
+}
+
+/**
+ * 解約タブに既に載っている「顧客ID|解約日」の組を返す (未記録分の書き出し用)。
+ * 取得できない場合は null = 判定できないので書き出しは行わない (重複を作らない)。
+ */
+export async function loadCancelSheetKeys(): Promise<Set<string> | null> {
+  try {
+    const client = await getSheets();
+    if (!client) return null;
+    const res = await client.sheets.spreadsheets.values.get({
+      spreadsheetId: client.spreadsheetId,
+      range: `${CANCEL_TAB}!A1:D100000`,
+    });
+    const rows: any[][] = res?.data?.values ?? [];
+    const keys = new Set<string>();
+    for (let i = 1; i < rows.length; i++) {          // 1行目は見出し
+      const id = String(rows[i]?.[0] ?? "").trim();
+      if (id) keys.add(`${id}|${normalizeSheetDate(rows[i]?.[3])}`);
+    }
+    return keys;
+  } catch (e: any) {
+    console.error("[entry-sheet] cancel keys read failed:", String(e?.message ?? e));
+    return null;
   }
 }
 

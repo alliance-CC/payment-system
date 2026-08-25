@@ -47,8 +47,30 @@ function backToBoard(formData: FormData, extra: Record<string, string> = {}): st
 export async function cancelAction(formData: FormData): Promise<void> {
   requireAdmin();
   const accountId = String(formData.get("accountId") ?? "").trim();
-  if (accountId) await cancelSubscription(accountId);
-  redirect(backToBoard(formData));
+  if (!accountId) redirect(backToBoard(formData));
+
+  const res = await cancelSubscription(accountId);
+  // 連携スプレッドシートへ書けなかった場合はその旨も表示する。
+  // 黙って進むと「解約したのにシートに載っていない」ことに気づけない。
+  redirect(backToBoard(formData,
+    res.sheetOk === false
+      ? { cancel: "nosheet", cerr: (res.sheetError ?? "").slice(0, 200) }
+      : {}));
+}
+
+// 連携スプレッドシート「解約」タブの未記録分をまとめて書き出す (課金設定のボタン)。
+// タブ名の相違や一時的な障害で書けていなかった解約を回収する。
+// 既に載っている「顧客ID + 解約日」は書かないので、何度押しても重複しない。
+export async function backfillCancelSheetAction(): Promise<void> {
+  requireAdmin();
+  const { backfillCancelSheet } = await import("@/features/payments/billing");
+  const r = await backfillCancelSheet().catch((e: any) => ({
+    ok: false, written: 0, skipped: 0, error: String(e?.message ?? e),
+  }));
+
+  const q = new URLSearchParams({ bf: r.ok ? "1" : "0", bfw: String(r.written), bfs: String(r.skipped) });
+  if (!r.ok && r.error) q.set("bferr", r.error.slice(0, 200));
+  redirect(`/admin/settings?${q.toString()}`);
 }
 
 // 顧客ごとのプラン変更。契約の plan_id/plan_name/amount を書き換えるだけ。

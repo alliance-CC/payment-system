@@ -25,6 +25,8 @@ export type ContractRow = {
   contact_phone: string | null;
   contact_email: string | null;
   free_key: string | null;
+  /** 解約日時 (未解約は null) */
+  canceled_at?: string | null;
   /** 利用開始日 (2ヶ月無料の起点)。列 p001 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
   service_start_date?: string | null;
   /** ウイルスバスターのライセンスキー。列 p002 未適用の環境では未取得(undefined)。基本SELECTには含めない。 */
@@ -34,7 +36,7 @@ export type ContractRow = {
 const CONTRACT_COLS =
   "id, tenant_id, account_id, customer_id, deal_id, plan_id, plan_name, amount, payment_method, status, " +
   "started_at, anchor_day, next_charge_date, consecutive_failures, last_result_code, last_charged_at, " +
-  "contact_name, contact_phone, contact_email, free_key";
+  "contact_name, contact_phone, contact_email, free_key, canceled_at";
 
 /** 利用開始日をベストエフォートで保存 (列 p001 未適用でも申込を失敗させない)。 */
 export async function updateServiceStartDate(id: string, date: string | null): Promise<void> {
@@ -199,6 +201,20 @@ export async function updateContractRow(
   const service = createSupabaseService();
   const { error } = await service.from("payment_contracts").update(patch).eq("id", id);
   if (error) throw new Error(`payment_contracts update failed: ${error.message}`);
+}
+
+/** 解約済み (canceled_at あり) の契約を解約日の昇順で返す。
+ *  連携スプレッドシート「解約」タブの未記録分を書き出すために使う。 */
+export async function listCanceledContracts(limit = 5000): Promise<ContractRow[]> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_contracts")
+    .select(CONTRACT_COLS)
+    .not("canceled_at", "is", null)
+    .order("canceled_at", { ascending: true })
+    .limit(limit);
+  if (error) throw new Error(`payment_contracts canceled query failed: ${error.message}`);
+  return (data ?? []) as ContractRow[];
 }
 
 /** 課金対象 (次回課金日 ≤ 対象日 かつ 契約中/延滞) を抽出 (§5-②) */
