@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import { filterByContractMonth, type PartnerRow } from "./partner-query";
 
 const row = (contractDate: string, o: Partial<PartnerRow> = {}): PartnerRow => ({
+  accountId: "MR7f9abc",
   customerName: "山田 太郎",
   contractDate,
   serviceStartDate: "",

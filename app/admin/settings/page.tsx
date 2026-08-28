@@ -284,8 +284,8 @@ export default async function SettingsPage({ searchParams }: {
             <h2 className="font-semibold text-navy text-sm">外部企業向けダッシュボード</h2>
             <p className="text-[11px] text-muted">
               管理ボードで「エントリー済み」にした案件を、月別で外部企業へ共有します。
-              表示項目は <b>お客様名 / ご契約日 / ご利用開始日 / 退会日 / ご加入サービス名</b> の5つのみで、
-              会員ID・電話番号・メール・ライセンスキー・金額・課金状況は表示されません。
+              表示項目は <b>会員ID / お客様名 / ご契約日 / ご利用開始日 / 退会日 / ご加入サービス名</b> の6つのみで、
+              電話番号・メール・ライセンスキー・金額・課金状況は表示されません。
               下のURLとパスワードをコピーして先方へお渡しください。
             </p>
             <PartnerAccessPanel dashboardUrl={partnerUrl} initialPassword={raw.partnerPassword ?? ""} />
