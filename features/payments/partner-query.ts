@@ -3,8 +3,9 @@
 // 出す対象: 管理ボードで「エントリー済み」にした案件だけ (entered_at が入っているもの)。
 //   まだエントリーしていない案件・申込未完了・エントリーせずに解約になった案件は出さない。
 //
-// 出す項目は5つだけ (お客様名 / ご契約日 / ご利用開始日 / 退会日 / ご加入サービス名)。
-// 会員ID・電話番号・メール・ライセンスキー・金額・課金状況などは一切含めない。
+// 出す項目は6つだけ
+//   (会員ID / お客様名 / ご契約日 / ご利用開始日 / 退会日 / ご加入サービス名)。
+// 電話番号・メール・ライセンスキー・金額・課金状況などは一切含めない。
 // カード等の決済個人情報はそもそもシステムのどこにも保持していない (§7)。
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
@@ -15,6 +16,7 @@ import { firstChargeDate } from "./billing-config";
 const PAGE = 1000;
 
 export type PartnerRow = {
+  accountId: string;        // 会員ID (連携シートの「顧客ID」と同じ値)
   customerName: string;     // お客様名
   contractDate: string;     // ご契約日 (= 申込日)
   serviceStartDate: string; // ご利用開始日
@@ -63,7 +65,7 @@ export async function loadPartnerBoard(): Promise<PartnerBoard> {
     for (let from = 0; ; from += PAGE) {
       const res = await svc
         .from("payment_contracts")
-        .select("id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
+        .select("id, account_id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
         .not("entered_at", "is", null)
         .order("started_at", { ascending: true })
         .range(from, from + PAGE - 1);
@@ -90,6 +92,7 @@ export async function loadPartnerBoard(): Promise<PartnerBoard> {
     const chosen = ssMap.get(r.id) || null;
     return {
       contractDate,
+      accountId: r.account_id ?? "",
       customerName: r.contact_name ?? "",
       serviceStartDate: chosen ?? (contractDate ? firstChargeDate(contractDate, 1) : ""),
       withdrawalDate: jstDate(r.canceled_at),
