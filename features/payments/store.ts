@@ -55,7 +55,7 @@ export async function updateLicenseKey(id: string, key: string | null): Promise<
 }
 
 /**
- * 追加列 (p001/p002/p004) を contract_id 単位で引く共通処理。
+ * 追加列 (p001/p002/p004/p005) を contract_id 単位で引く共通処理。
  *
  * ・.in() は id をURLに並べるため、件数が増えるとURL長の上限に当たる。
  *   200件ずつに分けて問い合わせる (1件あたり36文字のUUIDでも約7KB)。
@@ -95,6 +95,43 @@ export async function getServiceStartMap(ids: string[]): Promise<Map<string, str
  *  (列 p004 未適用なら空 = 全件「未エントリー」表示になる)。 */
 export async function getEnteredMap(ids: string[]): Promise<Map<string, string | null>> {
   return getContractColumnMap(ids, "entered_at");
+}
+
+/** contract_id → SAF案件番号 のマップをベストエフォートで取得
+ *  (列 p005 未適用なら空 = 入力欄が空で表示される)。 */
+export async function getSafCaseNoMap(ids: string[]): Promise<Map<string, string | null>> {
+  return getContractColumnMap(ids, "saf_case_no");
+}
+
+/**
+ * SAF案件番号をまとめて保存する (管理画面の手入力)。
+ *
+ * 保存漏れに気づけるよう、失敗は握りつぶさず呼び出し側へ返す。
+ * 空文字を渡した場合は null で消す (入力の取り消し)。
+ */
+export async function setSafCaseNos(
+  entries: Array<{ accountId: string; value: string }>,
+): Promise<{ ok: boolean; count: number; error?: string }> {
+  const rows = entries
+    .map((e) => ({ accountId: String(e.accountId ?? "").trim(), value: String(e.value ?? "").trim() }))
+    .filter((e) => e.accountId);
+  if (!rows.length) return { ok: true, count: 0 };
+
+  try {
+    const service = createSupabaseService();
+    let count = 0;
+    for (const r of rows) {
+      const { error } = await service
+        .from("payment_contracts")
+        .update({ saf_case_no: r.value || null })
+        .eq("account_id", r.accountId);
+      if (error) return { ok: false, count, error: error.message };
+      count++;
+    }
+    return { ok: true, count };
+  } catch (e: any) {
+    return { ok: false, count: 0, error: String(e?.message ?? e) };
+  }
 }
 
 /**

@@ -1,10 +1,11 @@
 // ④ CSV 出力用のデータ取得。
-//   エントリーCSV … 申込日 (payment_contracts.started_at) を軸に期間で抽出
-//   解約CSV      … 解約日 (payment_contracts.canceled_at) を軸に期間で抽出
+//   エントリーCSV     … 申込日 (payment_contracts.started_at) を軸に期間で抽出
+//   解約CSV          … 解約日 (payment_contracts.canceled_at) を軸に期間で抽出
+//   データローダ用CSV … 申込日を軸に期間で抽出。SAF案件番号が入っているものだけ
 // カード等の決済個人情報は一切含めない (§7)。
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getServiceStartMap, getLicenseKeyMap } from "./store";
+import { getServiceStartMap, getLicenseKeyMap, getSafCaseNoMap } from "./store";
 import { formatPhoneJp } from "./phone";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom } from "./billing-config";
 
@@ -21,6 +22,13 @@ export type EntryExportRow = {
 export type CancelExportRow = {
   accountId: string;
   canceledDate: string;
+};
+
+export type DataLoaderExportRow = {
+  safCaseNo: string;      // SAF案件番号
+  serviceName: string;    // 付帯名 (暮らし安心プラス / 暮らし安心プレミアム)
+  chargeStartDate: string;// 課金開始日
+  canceledDate: string;   // 解約日 (未解約は空)
 };
 
 /** JST の日付範囲 [from, to] を UTC の時刻範囲に変換する。
@@ -151,4 +159,47 @@ export async function loadCancelExport(from: string, to: string): Promise<Cancel
       accountId: r.account_id ?? "",
       canceledDate: jstDate(r.canceled_at),
     }));
+}
+
+/**
+ * ⑤ データローダ用CSV: 申込日が [from, to] の案件 (申込日の昇順)。
+ *
+ * ・SAF案件番号が入力済みの案件だけを出す
+ *   — 番号が無い行はデータローダの取込キーが無く、入れても使えないため。
+ * ・解約済みも含める (解約日を渡すための出力なので、除外すると用をなさない)。
+ * ・申込未完了 (3DS離脱等) は出さない。
+ */
+export async function loadDataLoaderExport(from: string, to: string): Promise<DataLoaderExportRow[]> {
+  const svc = createSupabaseService();
+  const { gte, lt } = jstRangeToUtc(from, to);
+  const { data, error } = await svc
+    .from("payment_contracts")
+    .select("id, plan_name, plan_id, started_at, canceled_at")
+    .gte("started_at", gte)
+    .lt("started_at", lt)
+    .order("started_at", { ascending: true });
+  if (error) throw new Error(`payment_contracts dataloader export query failed: ${error.message}`);
+
+  const all = data ?? [];
+  const skip = await loadIncompleteContractIds(all.map((r: any) => r.id));
+  const rows = all.filter((r: any) => !skip.has(r.id));
+
+  const ids = rows.map((r: any) => r.id);
+  const [ssMap, safMap, policy] = await Promise.all([
+    getServiceStartMap(ids), getSafCaseNoMap(ids), loadBillingPolicy(),
+  ]);
+
+  return rows
+    .map((r: any): DataLoaderExportRow => {
+      const applied = jstDate(r.started_at);
+      // 利用開始日・課金開始日は管理ボード / エントリーCSV と同じ規則で求める
+      const serviceStart = ssMap.get(r.id) || (applied ? firstChargeDate(applied, 1) : "");
+      return {
+        safCaseNo: (safMap.get(r.id) ?? "").trim(),
+        serviceName: r.plan_name ?? r.plan_id ?? "",
+        chargeStartDate: chargeStartDateFrom(serviceStart, policy.freeMonths, policy.chargeDay),
+        canceledDate: jstDate(r.canceled_at),
+      };
+    })
+    .filter((r: DataLoaderExportRow) => r.safCaseNo);   // SAF案件番号が未入力の案件は出さない
 }

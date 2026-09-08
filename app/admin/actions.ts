@@ -5,6 +5,7 @@ import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE
 import { cancelSubscription } from "@/features/payments/billing";
 import {
   hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds,
+  setSafCaseNos,
 } from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
 import { chargeByAccount, deleteAccount } from "@/features/payments/veritrans/paynowid";
@@ -158,6 +159,32 @@ export async function markEnteredAction(formData: FormData): Promise<void> {
     entry: entered ? "ok" : "undo",
     n: String(res.count),
   }));
+}
+
+// SAF案件番号 (現場が手入力する管理番号) の一括保存。
+//   一覧の各行の入力欄をまとめて1回で保存する。値が変わった行だけ更新するので、
+//   関係ない行に書き込みが走らない。決済・契約の状態には一切影響しない。
+export async function saveSafCaseNosAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const ids = formData.getAll("safAccountId").map(String);
+  const values = formData.getAll("safValue").map(String);
+  const originals = formData.getAll("safOriginal").map(String);
+
+  const changed = ids
+    .map((accountId, i) => ({
+      accountId,
+      value: (values[i] ?? "").trim(),
+      original: (originals[i] ?? "").trim(),
+    }))
+    .filter((e) => e.accountId && e.value !== e.original);
+
+  if (!changed.length) redirect(backToBoard(formData, { saf: "none" }));
+
+  const res = await setSafCaseNos(changed);
+  if (!res.ok) {
+    redirect(backToBoard(formData, { saf: "err", saferr: (res.error ?? "unknown").slice(0, 200) }));
+  }
+  redirect(backToBoard(formData, { saf: "ok", safn: String(res.count) }));
 }
 
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。

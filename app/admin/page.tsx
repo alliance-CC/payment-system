@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp, CheckSquare, X,
+  LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp, CheckSquare, X, Save,
 } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
@@ -9,6 +9,7 @@ import { loadPlans } from "@/features/payments/plans";
 import { todayJst } from "@/features/payments/billing-config";
 import {
   cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
+  saveSafCaseNosAction,
 } from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
@@ -20,6 +21,10 @@ import SelectAllCheckbox from "./SelectAllCheckbox";
 // エントリー済みチェックの保存先フォーム。行内のチェックボックスは form 属性でここへ紐づける
 // (行には解約・削除のフォームが既にあり、フォームを入れ子にできないため)。
 const MARK_FORM_ID = "entry-mark-form";
+
+// SAF案件番号の保存先フォーム。行内の入力欄は form 属性でここへ紐づける
+// (行には解約・削除のフォームが既にあり、フォームを入れ子にできないため)。
+const SAF_FORM_ID = "saf-case-no-form";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "登録者管理 | Memoreal Payments" };
@@ -74,6 +79,7 @@ export default async function AdminBoardPage({
     del?: string; plan?: string; testcharge?: string; code?: string;
     select?: string; entry?: string; n?: string; eerr?: string;
     cancel?: string; cerr?: string;
+    saf?: string; safn?: string; saferr?: string;
   };
 }) {
   requireAdmin();
@@ -130,6 +136,16 @@ export default async function AdminBoardPage({
     err: {
       text: `エントリー済みの保存に失敗しました${searchParams.eerr ? `（${searchParams.eerr}）` : ""}。`
         + " entered_at 列が未作成の可能性があります（p004_entered_at.sql を実行してください）。",
+      ok: false,
+    },
+  };
+  const safRes = searchParams.saf ?? "";
+  const safMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: `SAF案件番号を ${searchParams.safn ?? ""} 件保存しました。`, ok: true },
+    none: { text: "変更された SAF案件番号がありませんでした。", ok: false },
+    err: {
+      text: `SAF案件番号の保存に失敗しました${searchParams.saferr ? `（${searchParams.saferr}）` : ""}。`
+        + " saf_case_no 列が未作成の可能性があります（p005_saf_case_no.sql を実行してください）。",
       ok: false,
     },
   };
@@ -190,6 +206,12 @@ export default async function AdminBoardPage({
             <span className="block mt-1">
               シートの共有設定とタブ名をご確認のうえ、課金設定の「解約の記録漏れを補う」で復旧できます。
             </span>
+          </div>
+        )}
+        {/* SAF案件番号の保存結果 */}
+        {safRes && safMsg[safRes] && (
+          <div className={"card p-3 text-sm " + (safMsg[safRes].ok ? "text-good" : "text-bad")}>
+            {safMsg[safRes].text}
           </div>
         )}
         {/* エントリー済みチェックの結果通知 */}
@@ -274,6 +296,9 @@ export default async function AdminBoardPage({
             <button formAction="/admin/export/cancel" className="btn text-xs py-1 flex items-center gap-1">
               <Download size={12} />解約
             </button>
+            <button formAction="/admin/export/dataloader" className="btn text-xs py-1 flex items-center gap-1">
+              <Download size={12} />データローダ
+            </button>
             <label className="flex items-center gap-1 text-[11px] text-muted pb-1.5 cursor-pointer">
               {/* 未チェックでも値を送るための hidden。ルート側は "1" の有無で判定する */}
               <input type="checkbox" name="header" value="1" />
@@ -283,6 +308,10 @@ export default async function AdminBoardPage({
             <span className="text-[11px] text-muted pb-1.5">
               エントリー=申込日 / 解約=解約日 で抽出
             </span>
+            <p className="text-[11px] text-muted w-full">
+              データローダ = SAF案件番号 / 付帯名 / 課金開始日 / 解約日。申込日で抽出し、
+              <b>SAF案件番号が入力済みの案件のみ</b>出力します（解約済みも含みます）。
+            </p>
           </form>
         </details>
 
@@ -339,6 +368,17 @@ export default async function AdminBoardPage({
           ))}
         </div>
 
+        {/* SAF案件番号の保存。行内の入力欄はこのフォームへ紐づいており、まとめて1回で保存する */}
+        <form id={SAF_FORM_ID} action={saveSafCaseNosAction} className="flex flex-wrap items-center gap-2">
+          <ViewState month={month} scope={scope} status={status} q={q} />
+          <button className="btn text-xs py-1 flex items-center gap-1">
+            <Save size={13} />SAF案件番号を保存
+          </button>
+          <span className="text-[11px] text-muted">
+            一覧の「SAF案件番号」に入力してから押してください（変更した行だけ保存されます）
+          </span>
+        </form>
+
         {/* 一覧 */}
         <div className="card overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">
@@ -349,6 +389,7 @@ export default async function AdminBoardPage({
                 )}
                 <th className="px-3 py-2 font-medium">申込日</th>
                 <th className="px-3 py-2 font-medium">会員ID</th>
+                <th className="px-3 py-2 font-medium">SAF案件番号</th>
                 <th className="px-3 py-2 font-medium">プラン</th>
                 <th className="px-3 py-2 font-medium">利用開始</th>
                 <th className="px-3 py-2 font-medium">課金開始</th>
@@ -366,7 +407,7 @@ export default async function AdminBoardPage({
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={selectMode ? 15 : 14} className="px-3 py-8 text-center text-muted">
+                  <td colSpan={selectMode ? 16 : 15} className="px-3 py-8 text-center text-muted">
                     該当する登録者がいません
                     {scope === "month" && (
                       <>
@@ -399,6 +440,18 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2 text-muted">{r.appliedAt}</td>
                   <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
                     {r.accountId} <CopyButton value={r.accountId} />
+                  </td>
+                  <td className="px-3 py-2">
+                    {/* 現場が後から手入力する管理番号。行内の他フォームと入れ子にならないよう
+                        form 属性で保存先を指定し、まとめて1回で保存する。 */}
+                    <input type="hidden" name="safAccountId" value={r.accountId} form={SAF_FORM_ID} />
+                    <input type="hidden" name="safOriginal" value={r.safCaseNo} form={SAF_FORM_ID} />
+                    <input
+                      type="text" name="safValue" defaultValue={r.safCaseNo} form={SAF_FORM_ID}
+                      placeholder="未入力"
+                      aria-label={`${r.accountId} のSAF案件番号`}
+                      className="input text-xs py-0.5 px-1.5 w-28 font-mono"
+                    />
                   </td>
                   <td className="px-3 py-2">
                     <div>{r.planName}</div>

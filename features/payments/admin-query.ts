@@ -1,6 +1,6 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getServiceStartMap, getLicenseKeyMap, getEnteredMap } from "./store";
+import { getServiceStartMap, getLicenseKeyMap, getEnteredMap, getSafCaseNoMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom, todayJst } from "./billing-config";
 import {
   filterByScope, filterByStatus, filterByQuery, isAppliedIn, isEntryTodo, type BoardScope,
@@ -24,6 +24,7 @@ export type RegistrantRow = {
   consented: boolean;       // 利用規約 同意済み
   licenseKey: string | null;// ウイルスバスターのライセンスキー (プレミアムのみ)
   enteredAt: string | null; // 先方システムへエントリー済みの日付 (YYYY-MM-DD, JST)。null = 未
+  safCaseNo: string;        // SAF案件番号 (現場が手入力。未入力は空文字)
   monthBilling: "正常" | "決済不備" | "確認中" | "未課金" | "課金予定" | "対象外";
   billingAlert: boolean;    // 決済不備・確認中・延滞・期限切れ等の要注意
 };
@@ -70,6 +71,8 @@ export async function loadBoard(
   const lkMap = await getLicenseKeyMap(ids);
   // エントリー済みの記録 (列 p004 未適用なら空 → 全件「未」表示)
   const enMap = await getEnteredMap(ids);
+  // SAF案件番号 (列 p005 未適用なら空 → 入力欄が空で表示される)
+  const safMap = await getSafCaseNoMap(ids);
 
   // 同意記録の有無 (account_id 単位)
   const { data: consents } = await svc.from("payment_consents").select("account_id");
@@ -164,6 +167,7 @@ export async function loadBoard(
       consented: consentSet.has(c.account_id),
       licenseKey: lkMap.get(c.id) ?? null,
       enteredAt: jstDate(enMap.get(c.id) ?? null) || null,
+      safCaseNo: safMap.get(c.id) ?? "",
       monthBilling,
       billingAlert,
     };
