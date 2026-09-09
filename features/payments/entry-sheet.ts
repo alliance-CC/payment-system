@@ -36,6 +36,8 @@ export type EntrySheetRow = {
 /** エントリータブの列位置 (1始まり)。シートの項目が変わったときはここだけ直す。 */
 const ENTRY_COL = {
   customerId: 1,        // A
+  serviceStartDate: 3,  // C
+  chargeStartDate: 4,   // D
   withdrawalDate: 8,    // H
 } as const;
 
@@ -160,6 +162,29 @@ export async function appendEntryRow(row: EntrySheetRow): Promise<"written" | "d
  * 該当する顧客IDの行が無ければ何もしない。
  */
 export async function updateEntryWithdrawalDate(customerId: string, canceledDate: string): Promise<void> {
+  await writeEntryCell(customerId, ENTRY_COL.withdrawalDate, [canceledDate], "withdrawal date");
+}
+
+/**
+ * エントリータブの C列「ご利用開始日」と D列「課金開始日」を書き直す (非ブロッキング)。
+ * 管理画面で利用開始日を変更したとき、シート側の日付を古いまま残さないため。
+ */
+export async function updateEntryServiceDates(
+  customerId: string, serviceStartDate: string, chargeStartDate: string,
+): Promise<void> {
+  // C と D は隣接しているので1回の更新で書ける
+  await writeEntryCell(
+    customerId, ENTRY_COL.serviceStartDate, [serviceStartDate, chargeStartDate], "service dates",
+  );
+}
+
+/**
+ * エントリータブの該当行 (顧客IDで検索) の、指定列から右へ values を書き込む。
+ * 行が無ければ何もしない。失敗しても呼び出し元の処理は止めない。
+ */
+async function writeEntryCell(
+  customerId: string, startCol: number, values: string[], label: string,
+): Promise<void> {
   try {
     const key = (customerId ?? "").trim();
     if (!key) return;
@@ -178,15 +203,16 @@ export async function updateEntryWithdrawalDate(customerId: string, canceledDate
     }
     if (target === -1) return;                              // エントリー行が無い = 書く先が無い
 
-    const cell = `${ENTRY_TAB}!${String.fromCharCode(64 + ENTRY_COL.withdrawalDate)}${target}`;
+    const from = String.fromCharCode(64 + startCol);
+    const to = String.fromCharCode(64 + startCol + values.length - 1);
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: cell,
+      range: `${ENTRY_TAB}!${from}${target}:${to}${target}`,
       valueInputOption: "USER_ENTERED",
-      requestBody: { values: [[canceledDate]] },
+      requestBody: { values: [values] },
     });
   } catch (e: any) {
-    console.error("[entry-sheet] withdrawal date write failed:", String(e?.message ?? e));
+    console.error(`[entry-sheet] ${label} write failed:`, String(e?.message ?? e));
   }
 }
 

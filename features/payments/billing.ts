@@ -15,7 +15,7 @@ import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
 import { appendSignupRow } from "./signup-sheet";
 import {
   appendEntryRow, appendCancelRow, assignLicenseKey, updateEntryWithdrawalDate,
-  loadCancelSheetKeys, type SheetWriteResult,
+  updateEntryServiceDates, loadCancelSheetKeys, type SheetWriteResult,
 } from "./entry-sheet";
 import { formatPhoneJp } from "./phone";
 import {
@@ -24,13 +24,13 @@ import {
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
   insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey, getLicenseKeyMap,
   getChargeByOrderId, claimChargeFinalization, listInDoubt3dsCharges, hasUnfinishedInitialCharge,
-  listCanceledContracts,
+  listCanceledContracts, setServiceStartDate, hasChargedEver,
   type ContractRow,
 } from "./store";
 import {
   loadBillingPolicy, DEFAULT_TENANT_ID,
   todayJst, monthOf, yyyymmOf, addDays, nextChargeDateAfter, recurringOrderId,
-  firstChargeDate, endOfMonth,
+  firstChargeDate, chargeStartDateFrom, endOfMonth,
 } from "./billing-config";
 import { sendMail } from "@/features/messages/mail";
 
@@ -1337,6 +1337,72 @@ export async function replaceCard(input: {
 }
 
 // ---- 解約 (§6-7) ------------------------------------------------------------
+
+/**
+ * 利用開始日を変更する (管理画面の編集)。
+ *
+ * 利用開始日は「課金開始日」の起点なので、変えると請求のタイミングが動く。
+ * 次回課金日 (実際に課金される日) をどう扱うかは、課金がもう始まっているかで分ける:
+ *
+ *   ・まだ一度も課金していない → 次回課金日を新しい課金開始日に合わせる
+ *       (無料期間中の入力ミス訂正。ここを直さないと表示と実際の課金日がずれる)
+ *   ・すでに課金が始まっている → 次回課金日は動かさない
+ *       (過去に課金済みの月へ戻すと二重課金・請求漏れになるため。呼び出し側へ通知する)
+ *   ・解約済み             → 次回課金日は null のまま (課金対象外)
+ *
+ * 連携スプレッドシートのエントリー行も、書けるなら合わせて直す (非ブロッキング)。
+ */
+export async function changeServiceStartDate(accountId: string, newDate: string): Promise<{
+  ok: boolean; error?: string;
+  /** 変更後の課金開始日 */
+  chargeStartDate?: string;
+  /** 次回課金日も合わせて動かしたか */
+  nextChargeUpdated?: boolean;
+  /** すでに課金済みのため次回課金日は据え置いた */
+  keptNextCharge?: boolean;
+}> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(newDate ?? "").trim())) {
+    return { ok: false, error: "日付の形式が正しくありません" };
+  }
+  const date = newDate.trim();
+
+  const contract = await getContractByAccountId(accountId);
+  if (!contract) return { ok: false, error: "対象の案件が見つかりませんでした" };
+
+  const saved = await setServiceStartDate(contract.id, date);
+  if (!saved.ok) return { ok: false, error: saved.error };
+
+  const policy = await loadBillingPolicy();
+  const chargeStartDate = chargeStartDateFrom(date, policy.freeMonths, policy.chargeDay);
+
+  let nextChargeUpdated = false;
+  let keptNextCharge = false;
+
+  if (contract.status !== "canceled") {
+    let charged = true;   // 判定できない場合は「課金済み」に倒す (次回課金日を勝手に動かさない)
+    try {
+      charged = await hasChargedEver(contract.id);
+    } catch (e: any) {
+      console.error("[payments] hasChargedEver failed:", String(e?.message ?? e));
+    }
+    if (charged) {
+      keptNextCharge = true;
+    } else {
+      try {
+        await updateContractRow(contract.id, { next_charge_date: chargeStartDate });
+        nextChargeUpdated = true;
+      } catch (e: any) {
+        return { ok: false, error: `次回課金日の更新に失敗しました: ${String(e?.message ?? e)}` };
+      }
+    }
+  }
+
+  // 連携シートのエントリー行も合わせる (失敗しても変更自体は成立させる)
+  await updateEntryServiceDates(contract.account_id, date, chargeStartDate)
+    .catch((e) => console.error("[payments] entry service dates write failed:", String(e?.message ?? e)));
+
+  return { ok: true, chargeStartDate, nextChargeUpdated, keptNextCharge };
+}
 
 export async function cancelSubscription(accountId: string): Promise<{
   ok: boolean; error?: string; effectiveUntil?: string;

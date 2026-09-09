@@ -1,6 +1,6 @@
 import Link from "next/link";
 import {
-  LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp, CheckSquare, X, Save,
+  LogOut, AlertTriangle, RefreshCw, Settings, Search, Download, TrendingUp, CheckSquare, X,
 } from "lucide-react";
 import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
@@ -9,7 +9,7 @@ import { loadPlans } from "@/features/payments/plans";
 import { todayJst } from "@/features/payments/billing-config";
 import {
   cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
-  saveSafCaseNosAction,
+  saveSafCaseNoAction, saveServiceStartDateAction,
 } from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
@@ -17,14 +17,12 @@ import ChangePlanButton from "./ChangePlanButton";
 import TestChargeButton from "./TestChargeButton";
 import CopyButton from "./CopyButton";
 import SelectAllCheckbox from "./SelectAllCheckbox";
+import InlineEdit from "./InlineEdit";
 
 // エントリー済みチェックの保存先フォーム。行内のチェックボックスは form 属性でここへ紐づける
 // (行には解約・削除のフォームが既にあり、フォームを入れ子にできないため)。
 const MARK_FORM_ID = "entry-mark-form";
 
-// SAF案件番号の保存先フォーム。行内の入力欄は form 属性でここへ紐づける
-// (行には解約・削除のフォームが既にあり、フォームを入れ子にできないため)。
-const SAF_FORM_ID = "saf-case-no-form";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "登録者管理 | Memoreal Payments" };
@@ -79,7 +77,8 @@ export default async function AdminBoardPage({
     del?: string; plan?: string; testcharge?: string; code?: string;
     select?: string; entry?: string; n?: string; eerr?: string;
     cancel?: string; cerr?: string;
-    saf?: string; safn?: string; saferr?: string;
+    saf?: string; saferr?: string;
+    ss?: string; ssdate?: string; sserr?: string;
   };
 }) {
   requireAdmin();
@@ -141,11 +140,30 @@ export default async function AdminBoardPage({
   };
   const safRes = searchParams.saf ?? "";
   const safMsg: Record<string, { text: string; ok: boolean }> = {
-    ok: { text: `SAF案件番号を ${searchParams.safn ?? ""} 件保存しました。`, ok: true },
-    none: { text: "変更された SAF案件番号がありませんでした。", ok: false },
+    ok: { text: "SAF案件番号を保存しました。", ok: true },
     err: {
       text: `SAF案件番号の保存に失敗しました${searchParams.saferr ? `（${searchParams.saferr}）` : ""}。`
         + " saf_case_no 列が未作成の可能性があります（p005_saf_case_no.sql を実行してください）。",
+      ok: false,
+    },
+  };
+  // 利用開始日の変更結果。課金開始日・次回課金日がどうなったかまで伝える
+  const ssRes = searchParams.ss ?? "";
+  const ssDate = searchParams.ssdate ?? "";
+  const ssMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: {
+      text: `利用開始日を変更しました。課金開始日は ${ssDate} になり、次回課金日も同じ日に合わせました。`,
+      ok: true,
+    },
+    kept: {
+      text: `利用開始日を変更しました。課金開始日の表示は ${ssDate} になります。`
+        + " ただしこの案件はすでに課金が始まっているため、次回課金日は変更していません"
+        + "（過去に課金した月へ戻すと二重課金・請求漏れになるため）。",
+      ok: false,
+    },
+    err: {
+      text: `利用開始日の変更に失敗しました${searchParams.sserr ? `（${searchParams.sserr}）` : ""}。`
+        + " service_start_date 列が未作成の可能性があります（p001_service_start_date.sql を実行してください）。",
       ok: false,
     },
   };
@@ -206,6 +224,12 @@ export default async function AdminBoardPage({
             <span className="block mt-1">
               シートの共有設定とタブ名をご確認のうえ、課金設定の「解約の記録漏れを補う」で復旧できます。
             </span>
+          </div>
+        )}
+        {/* 利用開始日の変更結果 */}
+        {ssRes && ssMsg[ssRes] && (
+          <div className={"card p-3 text-sm " + (ssMsg[ssRes].ok ? "text-good" : "text-bad")}>
+            {ssMsg[ssRes].text}
           </div>
         )}
         {/* SAF案件番号の保存結果 */}
@@ -368,16 +392,6 @@ export default async function AdminBoardPage({
           ))}
         </div>
 
-        {/* SAF案件番号の保存。行内の入力欄はこのフォームへ紐づいており、まとめて1回で保存する */}
-        <form id={SAF_FORM_ID} action={saveSafCaseNosAction} className="flex flex-wrap items-center gap-2">
-          <ViewState month={month} scope={scope} status={status} q={q} />
-          <button className="btn text-xs py-1 flex items-center gap-1">
-            <Save size={13} />SAF案件番号を保存
-          </button>
-          <span className="text-[11px] text-muted">
-            一覧の「SAF案件番号」に入力してから押してください（変更した行だけ保存されます）
-          </span>
-        </form>
 
         {/* 一覧 */}
         <div className="card overflow-x-auto">
@@ -442,16 +456,15 @@ export default async function AdminBoardPage({
                     {r.accountId} <CopyButton value={r.accountId} />
                   </td>
                   <td className="px-3 py-2">
-                    {/* 現場が後から手入力する管理番号。行内の他フォームと入れ子にならないよう
-                        form 属性で保存先を指定し、まとめて1回で保存する。 */}
-                    <input type="hidden" name="safAccountId" value={r.accountId} form={SAF_FORM_ID} />
-                    <input type="hidden" name="safOriginal" value={r.safCaseNo} form={SAF_FORM_ID} />
-                    <input
-                      type="text" name="safValue" defaultValue={r.safCaseNo} form={SAF_FORM_ID}
-                      placeholder="未入力"
-                      aria-label={`${r.accountId} のSAF案件番号`}
-                      className="input text-xs py-0.5 px-1.5 w-28 font-mono"
-                    />
+                    {/* 現場が後から手入力する管理番号。編集ボタンで入力欄に切り替えて保存する */}
+                    <form action={saveSafCaseNoAction}>
+                      <input type="hidden" name="accountId" value={r.accountId} />
+                      <ViewState month={month} scope={scope} status={status} q={q} />
+                      <InlineEdit
+                        name="safCaseNo" value={r.safCaseNo} mono
+                        label={`${r.accountId} のSAF案件番号`} placeholder="SAF-0001"
+                      />
+                    </form>
                   </td>
                   <td className="px-3 py-2">
                     <div>{r.planName}</div>
@@ -466,7 +479,18 @@ export default async function AdminBoardPage({
                       </form>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-muted">{r.serviceStart}</td>
+                  <td className="px-3 py-2">
+                    {/* 利用開始日は課金開始日の起点。変更すると次回課金日にも影響する
+                        (未課金なら合わせて動かし、課金開始後は据え置く) */}
+                    <form action={saveServiceStartDateAction}>
+                      <input type="hidden" name="accountId" value={r.accountId} />
+                      <ViewState month={month} scope={scope} status={status} q={q} />
+                      <InlineEdit
+                        name="serviceStartDate" type="date" value={r.serviceStart} width="w-36"
+                        label={`${r.accountId} の利用開始日`}
+                      />
+                    </form>
+                  </td>
                   <td className="px-3 py-2 text-muted">{r.chargeStart}</td>
                   <td className="px-3 py-2">{statusBadge(r.statusLabel)}</td>
                   <td className="px-3 py-2">

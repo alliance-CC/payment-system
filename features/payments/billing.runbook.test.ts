@@ -89,6 +89,13 @@ vi.mock("./store", () => ({
   getLicenseKeyMap: async () => new Map<string, string | null>(),
   insertConsent: async (row: any) => { mem.consents.push(row); },
   updateServiceStartDate: async () => {},
+  setServiceStartDate: async (id: string, date: string) => {
+    const c = mem.contracts.find((x) => x.id === id);
+    if (c) c.service_start_date = date;
+    return { ok: true };
+  },
+  hasChargedEver: async (cid: string) =>
+    mem.charges.some((c) => c.contract_id === cid && c.ok === true && ["recurring", "retry"].includes(c.kind)),
   getServiceStartMap: async () => new Map<string, string | null>(),
   updateLicenseKey: async () => {},
   listCanceledContracts: async () => [],
@@ -99,6 +106,7 @@ vi.mock("./entry-sheet", () => ({
   appendCancelRow: async () => ({ ok: true }),
   assignLicenseKey: async () => null,
   updateEntryWithdrawalDate: async () => {},
+  updateEntryServiceDates: async () => {},
   loadCancelSheetKeys: async () => null,
 }));
 vi.mock("./crm-adapter", () => ({
@@ -321,5 +329,88 @@ describe("決済登録が終わっていない契約は課金されない", () =
     captured = [];
     await runDays("2026-11-01", "2027-01-05");
     expect(chargeLog()).toEqual([]);
+  });
+});
+
+describe("利用開始日を変えたときの課金日の扱い", () => {
+  it("まだ課金していなければ、次回課金日も新しい課金開始日に合わせる", async () => {
+    setToday("2026-08-12");
+    const res = await billing.registerSubscription(baseInput({ serviceStartDate: "2026-09-01" }));
+    const accountId = res.ok ? res.accountId : "";
+    expect(mem.contracts[0].next_charge_date).toBe("2026-11-01");
+
+    // 利用開始日を1ヶ月後ろへ訂正
+    const r = await billing.changeServiceStartDate(accountId, "2026-10-01");
+
+    expect(r.ok).toBe(true);
+    expect(r.chargeStartDate).toBe("2026-12-01");
+    expect(r.nextChargeUpdated).toBe(true);
+    expect(mem.contracts[0].next_charge_date).toBe("2026-12-01");
+
+    // 実際の課金も新しい日に動く (11/1 には課金されない)
+    captured = [];
+    await runDays("2026-10-01", "2026-12-05");
+    expect(chargeLog().map((c) => c.date)).toEqual(["2026-12-01"]);
+  });
+
+  it("すでに課金が始まっていたら、次回課金日は動かさない (二重課金・請求漏れを防ぐ)", async () => {
+    setToday("2026-08-12");
+    const res = await billing.registerSubscription(baseInput({ serviceStartDate: "2026-09-01" }));
+    const accountId = res.ok ? res.accountId : "";
+
+    // 11月・12月と課金が進んだ状態にする
+    captured = [];
+    await runDays("2026-11-01", "2026-12-05");
+    expect(chargeLog().map((c) => c.date)).toEqual(["2026-11-01", "2026-12-01"]);
+    expect(mem.contracts[0].next_charge_date).toBe("2027-01-01");
+
+    // ここで利用開始日を過去へ動かしても、次回課金日は据え置き
+    const r = await billing.changeServiceStartDate(accountId, "2026-08-01");
+
+    expect(r.ok).toBe(true);
+    expect(r.keptNextCharge).toBe(true);
+    expect(r.nextChargeUpdated).toBeFalsy();
+    expect(mem.contracts[0].next_charge_date).toBe("2027-01-01");
+
+    // 課金済みの月へ戻って再課金されることもない
+    captured = [];
+    await runDays("2026-12-06", "2027-01-05");
+    expect(chargeLog().map((c) => c.date)).toEqual(["2027-01-01"]);
+  });
+
+  it("解約済みの案件では次回課金日を復活させない", async () => {
+    setToday("2026-08-12");
+    const res = await billing.registerSubscription(baseInput({ serviceStartDate: "2026-09-01" }));
+    const accountId = res.ok ? res.accountId : "";
+
+    setToday("2026-10-05");
+    await billing.cancelSubscription(accountId);
+    expect(mem.contracts[0].next_charge_date).toBeNull();
+
+    const r = await billing.changeServiceStartDate(accountId, "2026-10-01");
+
+    expect(r.ok).toBe(true);
+    expect(mem.contracts[0].next_charge_date).toBeNull();   // 解約のまま
+    captured = [];
+    await runDays("2026-10-06", "2027-01-05");
+    expect(chargeLog()).toEqual([]);
+  });
+
+  it("日付の形式が不正なら何も変えない", async () => {
+    setToday("2026-08-12");
+    const res = await billing.registerSubscription(baseInput({ serviceStartDate: "2026-09-01" }));
+    const accountId = res.ok ? res.accountId : "";
+
+    for (const bad of ["", "2026/10/01", "2026-13-01x", "あした"]) {
+      const r = await billing.changeServiceStartDate(accountId, bad);
+      expect(r.ok).toBe(false);
+    }
+    expect(mem.contracts[0].next_charge_date).toBe("2026-11-01");
+  });
+
+  it("存在しない会員IDならエラーを返す", async () => {
+    const r = await billing.changeServiceStartDate("MR-NOT-EXIST", "2026-10-01");
+    expect(r.ok).toBe(false);
+    expect(r.error).toBeTruthy();
   });
 });

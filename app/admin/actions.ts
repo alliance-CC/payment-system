@@ -2,10 +2,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
-import { cancelSubscription } from "@/features/payments/billing";
+import { cancelSubscription, changeServiceStartDate } from "@/features/payments/billing";
 import {
   hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds,
-  setSafCaseNos,
+  setSafCaseNo,
 } from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
 import { chargeByAccount, deleteAccount } from "@/features/payments/veritrans/paynowid";
@@ -161,30 +161,35 @@ export async function markEnteredAction(formData: FormData): Promise<void> {
   }));
 }
 
-// SAF案件番号 (現場が手入力する管理番号) の一括保存。
-//   一覧の各行の入力欄をまとめて1回で保存する。値が変わった行だけ更新するので、
-//   関係ない行に書き込みが走らない。決済・契約の状態には一切影響しない。
-export async function saveSafCaseNosAction(formData: FormData): Promise<void> {
+// SAF案件番号 (現場が手入力する管理番号) の保存。行の「編集」から1件ずつ。
+//   決済・契約の状態には一切影響しない (記録用の列を更新するだけ)。
+export async function saveSafCaseNoAction(formData: FormData): Promise<void> {
   requireAdmin();
-  const ids = formData.getAll("safAccountId").map(String);
-  const values = formData.getAll("safValue").map(String);
-  const originals = formData.getAll("safOriginal").map(String);
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const value = String(formData.get("safCaseNo") ?? "");
+  if (!accountId) redirect(backToBoard(formData));
 
-  const changed = ids
-    .map((accountId, i) => ({
-      accountId,
-      value: (values[i] ?? "").trim(),
-      original: (originals[i] ?? "").trim(),
-    }))
-    .filter((e) => e.accountId && e.value !== e.original);
+  const res = await setSafCaseNo(accountId, value);
+  redirect(backToBoard(formData,
+    res.ok ? { saf: "ok" } : { saf: "err", saferr: (res.error ?? "unknown").slice(0, 200) }));
+}
 
-  if (!changed.length) redirect(backToBoard(formData, { saf: "none" }));
+// 利用開始日の変更。課金開始日の起点なので、次回課金日の扱いは billing 側で判断する
+//   (未課金なら合わせて動かす / 課金開始後は据え置き)。
+export async function saveServiceStartDateAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const date = String(formData.get("serviceStartDate") ?? "").trim();
+  if (!accountId) redirect(backToBoard(formData));
 
-  const res = await setSafCaseNos(changed);
+  const res = await changeServiceStartDate(accountId, date);
   if (!res.ok) {
-    redirect(backToBoard(formData, { saf: "err", saferr: (res.error ?? "unknown").slice(0, 200) }));
+    redirect(backToBoard(formData, { ss: "err", sserr: (res.error ?? "unknown").slice(0, 200) }));
   }
-  redirect(backToBoard(formData, { saf: "ok", safn: String(res.count) }));
+  redirect(backToBoard(formData, {
+    ss: res.keptNextCharge ? "kept" : "ok",
+    ssdate: res.chargeStartDate ?? "",
+  }));
 }
 
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。
