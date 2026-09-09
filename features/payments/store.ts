@@ -46,6 +46,25 @@ export async function updateServiceStartDate(id: string, date: string | null): P
   } catch { /* 列が無ければ黙って無視 (管理表示は申込日から推定) */ }
 }
 
+/**
+ * 利用開始日を保存し、成否を返す (管理画面からの手動変更用)。
+ * 申込フローの updateServiceStartDate と違い、ここでは失敗を握りつぶさない
+ * — 変更したつもりで反映されていないと、課金日の認識がずれるため。
+ */
+export async function setServiceStartDate(
+  id: string, date: string,
+): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const service = createSupabaseService();
+    const { error } = await service
+      .from("payment_contracts").update({ service_start_date: date }).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
 /** ライセンスキーをベストエフォートで保存 (列 p002 未適用でも申込を失敗させない)。 */
 export async function updateLicenseKey(id: string, key: string | null): Promise<void> {
   try {
@@ -104,35 +123,27 @@ export async function getSafCaseNoMap(ids: string[]): Promise<Map<string, string
 }
 
 /**
- * SAF案件番号をまとめて保存する (管理画面の手入力)。
- *
+ * SAF案件番号を1件保存する (行の編集ボタンから)。空文字なら null で消す。
  * 保存漏れに気づけるよう、失敗は握りつぶさず呼び出し側へ返す。
- * 空文字を渡した場合は null で消す (入力の取り消し)。
  */
-export async function setSafCaseNos(
-  entries: Array<{ accountId: string; value: string }>,
-): Promise<{ ok: boolean; count: number; error?: string }> {
-  const rows = entries
-    .map((e) => ({ accountId: String(e.accountId ?? "").trim(), value: String(e.value ?? "").trim() }))
-    .filter((e) => e.accountId);
-  if (!rows.length) return { ok: true, count: 0 };
-
+export async function setSafCaseNo(
+  accountId: string, value: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const id = String(accountId ?? "").trim();
+  if (!id) return { ok: false, error: "会員IDが空です" };
   try {
     const service = createSupabaseService();
-    let count = 0;
-    for (const r of rows) {
-      const { error } = await service
-        .from("payment_contracts")
-        .update({ saf_case_no: r.value || null })
-        .eq("account_id", r.accountId);
-      if (error) return { ok: false, count, error: error.message };
-      count++;
-    }
-    return { ok: true, count };
+    const { error } = await service
+      .from("payment_contracts")
+      .update({ saf_case_no: String(value ?? "").trim() || null })
+      .eq("account_id", id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
   } catch (e: any) {
-    return { ok: false, count: 0, error: String(e?.message ?? e) };
+    return { ok: false, error: String(e?.message ?? e) };
   }
 }
+
 
 /**
  * 会員IDの一覧に「エントリー済み」を立てる / 外す (管理画面のチェック保存)。
@@ -282,6 +293,24 @@ export type ChargeRow = {
 };
 
 /** 対象月の成功課金が既に存在するか (二重課金ガードの1段目) */
+/**
+ * その契約が一度でも実課金に成功しているか。
+ * 利用開始日を変更したとき「次回課金日を動かしてよいか」の判定に使う。
+ * 初回登録時の0円与信 (kind='initial') は実課金ではないので数えない。
+ */
+export async function hasChargedEver(contractId: string): Promise<boolean> {
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("id")
+    .eq("contract_id", contractId)
+    .eq("ok", true)
+    .in("kind", ["recurring", "retry"])
+    .limit(1);
+  if (error) throw new Error(`payment_charges select failed: ${error.message}`);
+  return (data ?? []).length > 0;
+}
+
 export async function hasSuccessfulCharge(contractId: string, chargeMonth: string): Promise<boolean> {
   const service = createSupabaseService();
   const { data, error } = await service
