@@ -170,8 +170,11 @@ export async function saveSafCaseNoAction(formData: FormData): Promise<void> {
   if (!accountId) redirect(backToBoard(formData));
 
   const res = await setSafCaseNo(accountId, value);
+  // hl = 保存した行。横に長い一覧なので、戻ったときにどの行が変わったかを目立たせる
   redirect(backToBoard(formData,
-    res.ok ? { saf: "ok" } : { saf: "err", saferr: (res.error ?? "unknown").slice(0, 200) }));
+    res.ok
+      ? { saf: "ok", hl: accountId }
+      : { saf: "err", saferr: (res.error ?? "unknown").slice(0, 200), hl: accountId }));
 }
 
 // 利用開始日の変更。課金開始日の起点なので、次回課金日の扱いは billing 側で判断する
@@ -184,11 +187,14 @@ export async function saveServiceStartDateAction(formData: FormData): Promise<vo
 
   const res = await changeServiceStartDate(accountId, date);
   if (!res.ok) {
-    redirect(backToBoard(formData, { ss: "err", sserr: (res.error ?? "unknown").slice(0, 200) }));
+    redirect(backToBoard(formData, {
+      ss: "err", sserr: (res.error ?? "unknown").slice(0, 200), hl: accountId,
+    }));
   }
   redirect(backToBoard(formData, {
     ss: res.keptNextCharge ? "kept" : "ok",
     ssdate: res.chargeStartDate ?? "",
+    hl: accountId,   // 変更した行を一覧で目立たせる
   }));
 }
 
