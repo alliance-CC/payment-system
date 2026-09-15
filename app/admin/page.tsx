@@ -79,6 +79,7 @@ export default async function AdminBoardPage({
     cancel?: string; cerr?: string;
     saf?: string; saferr?: string;
     ss?: string; ssdate?: string; sserr?: string;
+    hl?: string;
   };
 }) {
   requireAdmin();
@@ -91,6 +92,10 @@ export default async function AdminBoardPage({
 
   // エントリー済みチェックの選択モード (?select=1)。URLで持つのでリロードしても外れない
   const selectMode = searchParams.select === "1";
+
+  // 直前に編集した会員ID。横に長い一覧なので、どの行が変わったかを色で示す
+  // (画面上部の結果メッセージまでスクロールしなくても気づけるようにするため)
+  const highlight = searchParams.hl ?? "";
 
   // 一覧の表示状態を保ったままの遷移先を組み立てる (更新・タブ切替・全案件リンク)
   const boardHref = (o: { scope?: string; status?: string; select?: boolean } = {}) => {
@@ -433,7 +438,15 @@ export default async function AdminBoardPage({
                 </tr>
               )}
               {rows.map((r) => (
-                <tr key={r.accountId} className={"border-b border-border/60 " + (r.billingAlert ? "bg-bad/5" : "")}>
+                <tr
+                  key={r.accountId}
+                  className={
+                    "border-b border-border/60 "
+                    + (r.accountId === highlight
+                      ? "bg-navy/10 ring-1 ring-inset ring-navy/30"
+                      : r.billingAlert ? "bg-bad/5" : "")
+                  }
+                >
                   {selectMode && (
                     <td className="px-3 py-2">
                       {/* エントリーの対象になり得る行だけ選べるようにする。
