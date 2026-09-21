@@ -118,8 +118,13 @@ export async function savePaymentSettings(cfg: PaymentSettings): Promise<{ ok: b
         .eq("id", existing.id);
       if (error) return { ok: false, error: error.message };
     } else {
-      const { error } = await svc.from("integrations")
-        .insert({ provider: PROVIDER, label: "default", tenant_id: DEFAULT_TENANT_ID, config: cfg });
+      // is_active は必ず明示する。読み出し側 (loadPaymentSettings) が
+      // is_active=true の行だけを見るため、列の既定値まかせにすると
+      // 「保存はできたのに読み戻せない = 設定したのに反映されない」状態になりうる。
+      const { error } = await svc.from("integrations").insert({
+        provider: PROVIDER, label: "default", tenant_id: DEFAULT_TENANT_ID,
+        config: cfg, is_active: true,
+      });
       if (error) return { ok: false, error: error.message };
     }
     return { ok: true };
