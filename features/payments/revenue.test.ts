@@ -6,11 +6,17 @@ const state: { contracts: any[]; charges: any[]; ss: Map<string, string> } = {
   contracts: [], charges: [], ss: new Map(),
 };
 
-// Supabase クエリビルダの薄いモック (select/gte/lte/in/eq/order は自身を返す thenable)
+// Supabase クエリビルダの薄いモック。
+// range(from,to) は実際に切り出す — ページング処理が1ページ目で止まることを確かめるため
+// (切り出さないと毎回全件が返り、無限ループになって検知できない)。
 function query(data: any) {
-  const p: any = Promise.resolve({ data, error: null });
-  for (const m of ["select", "gte", "lte", "in", "eq", "order"]) p[m] = () => p;
-  return p;
+  const make = (rows: any[]) => {
+    const p: any = Promise.resolve({ data: rows, error: null });
+    for (const m of ["select", "gte", "lte", "in", "eq", "order", "not", "is"]) p[m] = () => p;
+    p.range = (from: number, to: number) => make(rows.slice(from, to + 1));
+    return p;
+  };
+  return make(data);
 }
 vi.mock("@/shared/db/service", () => ({
   createSupabaseService: () => ({

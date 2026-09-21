@@ -3,6 +3,7 @@
 // テナント境界は必ず tenant_id 条件で強制すること (RLS バイパスのため)。
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
+import { fetchAllPages, fetchAllByIds, chunk, ID_CHUNK } from "./db-paging";
 
 export type ContractRow = {
   id: string;
@@ -87,12 +88,11 @@ async function getContractColumnMap(
 ): Promise<Map<string, string | null>> {
   const map = new Map<string, string | null>();
   if (!ids.length) return map;
-  const CHUNK = 200;
   try {
     const service = createSupabaseService();
-    for (let i = 0; i < ids.length; i += CHUNK) {
+    for (const part of chunk(ids, ID_CHUNK)) {
       const { data, error } = await service
-        .from("payment_contracts").select(`id, ${column}`).in("id", ids.slice(i, i + CHUNK));
+        .from("payment_contracts").select(`id, ${column}`).in("id", part);
       if (error) return map;        // 列が無い等。取得できた分も使わない (中途半端に混ぜない)
       for (const r of data ?? []) map.set((r as any).id, (r as any)[column] ?? null);
     }
@@ -265,15 +265,27 @@ export async function getIncompleteContractIds(ids: string[]): Promise<Set<strin
   const skip = new Set<string>();
   if (!ids.length) return skip;
   const service = createSupabaseService();
-  const { data, error } = await service
-    .from("payment_charges")
-    .select("contract_id, ok")
-    .eq("kind", "initial")
-    .in("contract_id", ids);
-  if (error) return skip;
+  let data: any[];
+  try {
+    // 契約IDをまとめてURLに載せるとURL長の上限に当たり、初回取引は1契約に複数行
+    // ぶら下がるため行数上限にも当たる。分割 + ページングで全件取る。
+    data = await fetchAllByIds<any>(
+      ids,
+      (part, from, to) => service
+        .from("payment_charges")
+        .select("contract_id, ok")
+        .eq("kind", "initial")
+        .in("contract_id", part)
+        .order("id", { ascending: true })   // 範囲取得のため一意なキーで並べる
+        .range(from, to),
+      "payment_charges initial query",
+    );
+  } catch {
+    return skip;                            // 判定できない場合は誰も除外しない
+  }
   const hasSuccess = new Set<string>();
   const seen = new Set<string>();
-  for (const r of data ?? []) {
+  for (const r of data) {
     const cid = String((r as any).contract_id);
     seen.add(cid);
     if ((r as any).ok === true) hasSuccess.add(cid);
@@ -284,16 +296,20 @@ export async function getIncompleteContractIds(ids: string[]): Promise<Set<strin
 
 /** 解約済み (canceled_at あり) の契約を解約日の昇順で返す。
  *  連携スプレッドシートの退会日を後から埋め直すために使う。 */
-export async function listCanceledContracts(limit = 5000): Promise<ContractRow[]> {
+export async function listCanceledContracts(): Promise<ContractRow[]> {
   const service = createSupabaseService();
-  const { data, error } = await service
-    .from("payment_contracts")
-    .select(CONTRACT_COLS)
-    .not("canceled_at", "is", null)
-    .order("canceled_at", { ascending: true })
-    .limit(limit);
-  if (error) throw new Error(`payment_contracts canceled query failed: ${error.message}`);
-  return (data ?? []) as ContractRow[];
+  // .limit() では Supabase の行数上限 (1000) を越えられないため range で全件読む。
+  // 範囲取得なので、並び順は解約日だけでなく id まで含めて一意にする。
+  return await fetchAllPages<ContractRow>(
+    (from, to) => service
+      .from("payment_contracts")
+      .select(CONTRACT_COLS)
+      .not("canceled_at", "is", null)
+      .order("canceled_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts canceled query",
+  );
 }
 
 /**
