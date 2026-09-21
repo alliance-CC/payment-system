@@ -31,6 +31,18 @@ export type PaymentSettings = {
     checkedAt: string;  // 集計時刻 (ISO)
   } | null;
 
+  /**
+   * 日次課金Cronが最後に完走した記録 (Cronが更新。表示専用)。
+   * 管理ボードが「Cronが動いていない」ことを検知するために使う。
+   * 管理画面の保存で消さないこと (licenseStock と同じ扱い)。
+   */
+  lastChargeRun?: {
+    at: string;        // 完走時刻 (ISO)
+    charged: number;   // 課金できた件数
+    failed: number;    // 決済に失敗した件数
+    errors: number;    // 処理中に出たエラーの数
+  } | null;
+
   // --- 外部企業向けダッシュボード (/partner) ---
   /**
    * 外部企業へ渡すログインパスワード。管理画面で発行し、そのままコピーして共有する。
