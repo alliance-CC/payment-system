@@ -251,6 +251,9 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
   const list = (k: string) =>
     String(formData.get(k) ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+  // Cron が書き込む項目 (licenseStock / lastChargeRun) を引き継ぐために先に読む
+  const current = await loadPaymentSettings();
+
   const settings: PaymentSettings = {
     plans,
     freeMonths: Math.max(0, num("freeMonths", 2)),
@@ -266,10 +269,12 @@ export async function saveSettingsAction(formData: FormData): Promise<void> {
       subject: String(formData.get("welcome_subject") ?? "").trim(),
       body: String(formData.get("welcome_body") ?? "").trim(),
     },
-    // ①②③ 連携スプレッドシート。在庫集計(licenseStock)は Cron が書き込むため
-    // ここでは編集せず既存値を引き継ぐ (管理画面の保存で消さない)。
+    // ①②③ 連携スプレッドシート。在庫集計(licenseStock)と課金Cronの実行記録
+    // (lastChargeRun) は Cron が書き込むため、ここでは編集せず既存値を引き継ぐ
+    // (管理画面の保存で消すと、Cronが動いているかの判定ができなくなる)。
     signupSheetId: String(formData.get("signupSheetId") ?? "").trim() || null,
-    licenseStock: (await loadPaymentSettings()).licenseStock ?? null,
+    licenseStock: current.licenseStock ?? null,
+    lastChargeRun: current.lastChargeRun ?? null,
     // 外部企業向けダッシュボードのパスワード。空にすると /partner は閉鎖される。
     partnerPassword: String(formData.get("partnerPassword") ?? "").trim() || null,
   };

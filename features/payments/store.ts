@@ -296,6 +296,23 @@ export async function listCanceledContracts(limit = 5000): Promise<ContractRow[]
   return (data ?? []) as ContractRow[];
 }
 
+/**
+ * DB に到達できるかの確認 (1行だけ読む)。
+ *
+ * 課金Cronが「DBに繋がらない」と「今日は対象0件」を取り違えないために使う。
+ * 取り違えると、課金が1件も走らないまま正常終了として扱われ、誰も気づけない。
+ */
+export async function pingDb(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const service = createSupabaseService();
+    const { error } = await service.from("payment_contracts").select("id").limit(1);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
+}
+
 /** 課金対象 (次回課金日 ≤ 対象日 かつ 契約中/延滞) を抽出 (§5-②) */
 export async function listDueContracts(dueDate: string, limit: number): Promise<ContractRow[]> {
   const service = createSupabaseService();

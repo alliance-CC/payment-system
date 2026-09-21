@@ -6,6 +6,8 @@ import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { parseScope } from "@/features/payments/admin-filter";
 import { loadPlans } from "@/features/payments/plans";
+import { loadPaymentSettings } from "@/features/payments/payment-settings";
+import { cronHealth, describeAgo, CRON_STALE_HOURS } from "@/features/payments/cron-health";
 import { todayJst } from "@/features/payments/billing-config";
 import {
   cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
@@ -172,11 +174,16 @@ export default async function AdminBoardPage({
       ok: false,
     },
   };
-  const [{ rows, counts, totalAll, outOfScopeAlerts }, plans] = await Promise.all([
+  const [{ rows, counts, totalAll, outOfScopeAlerts }, plans, settings] = await Promise.all([
     loadBoard({ month, status, q, scope }),
     loadPlans(),
+    loadPaymentSettings(),
   ]);
   const today = todayJst();   // CSV出力の期間の既定値 (当日1日分)
+
+  // 日次課金Cronが動いているか。Cron が起動しなくなった場合は 503 も通知メールも
+  // 鳴らないため、最後に完走した時刻が古くなっていないかをここで見張る。
+  const cron = cronHealth(settings.lastChargeRun?.at);
 
   return (
     <main className="min-h-screen bg-bg p-4 sm:p-6">
@@ -202,6 +209,24 @@ export default async function AdminBoardPage({
             </form>
           </div>
         </header>
+
+        {/* 日次課金Cronが止まっていないかの見張り。
+            Cron が起動しなくなると 503 も通知メールも鳴らないため、ここが最後の砦。 */}
+        {cron.state === "stale" && (
+          <div className="card p-3 text-sm text-bad border border-bad/40">
+            ⚠️ <b>日次課金が {CRON_STALE_HOURS} 時間以上実行されていません</b>
+            （最後の実行: {describeAgo(cron.hoursAgo)}）。
+            <span className="block mt-1">
+              課金が止まっている可能性があります。Vercel の Cron 設定と実行ログ、
+              環境変数 <code className="font-mono">CRON_SECRET</code> をご確認ください。
+            </span>
+          </div>
+        )}
+        {cron.state === "never" && (
+          <div className="card p-3 text-sm text-muted">
+            日次課金の実行記録がまだありません（次回の実行後にこちらへ状況が表示されます）。
+          </div>
+        )}
 
         {/* 削除結果の通知 */}
         {del && delMsg[del] && (

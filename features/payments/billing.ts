@@ -1256,6 +1256,52 @@ async function notifyCardExpired(contract: ContractRow): Promise<void> {
   ).catch(() => {});
 }
 
+// ---- 日次課金の監視 (異常を残す / 動いていないことに気づく) -------------------
+//
+// 課金は「失敗したこと」より「実行されなかったこと」に気づけないほうが怖い。
+// 3段構えにする:
+//   ① Cron が異常終了したら 503 + errors を返す (Vercel の Cron ログに失敗として残る)
+//   ② console.error と通知メール (宛先は DB設定 → env PAYMENTS_NOTIFY_EMAIL の順)
+//   ③ 完走した時刻を記録し、更新が止まったら管理ボードが警告する
+//      — Cron がそもそも起動しなかった場合に鳴るのはこれだけ
+
+/** 課金Cronの異常を、ログと通知メールの両方に残す (どちらが欠けても気づけるように)。 */
+export async function notifyCronFailure(reason: string, detail: string): Promise<void> {
+  console.error("[payments/cron] 異常:", reason, detail.slice(0, 500));
+
+  // DB不通時でも宛先を解決できるよう、loadBillingPolicy は env へフォールバックする
+  const policy = await loadBillingPolicy().catch(() => null);
+  const to = policy?.notifyEmail || process.env.PAYMENTS_NOTIFY_EMAIL || "";
+  if (!to) return;
+
+  const body = [
+    "日次課金Cronで異常が発生しました。当日の課金が実行できていない可能性があります。",
+    "",
+    `内容: ${reason}`,
+    detail ? `詳細: ${detail.slice(0, 1000)}` : "",
+    "",
+    `発生時刻: ${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}`,
+    "管理ボードの「当月課金」列で、未課金の案件が無いかご確認ください。",
+  ].filter(Boolean).join("\n");
+
+  await sendMail({ to, subject: "【継続課金】日次課金Cronの異常", body })
+    .catch((e: any) => console.error("[payments/cron] 通知メール送信に失敗:", String(e?.message ?? e)));
+}
+
+/** 課金Cronが完走した記録を残す (管理ボードの「動いているか」判定に使う)。
+ *  記録に失敗しても課金結果には影響させない。 */
+export async function recordDailyChargeRun(summary: DailyChargeSummary): Promise<void> {
+  const { patchPaymentSettings } = await import("./payment-settings");
+  await patchPaymentSettings({
+    lastChargeRun: {
+      at: new Date().toISOString(),
+      charged: summary.charged,
+      failed: summary.failed,
+      errors: summary.errors.length,
+    },
+  }).catch((e: any) => console.error("[payments/cron] 実行記録の保存に失敗:", String(e?.message ?? e)));
+}
+
 // ---- 在疑義課金の手動確定 (§5-② 運用) ---------------------------------------
 // ok=null の試行が残ると当月の再課金が止まる (二重課金防止)。VeriTrans の
 // 取引照会 (MAP/API) で実際の結果を確認したうえで、管理画面からここを呼んで確定する。
