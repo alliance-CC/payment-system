@@ -251,8 +251,39 @@ export async function updateContractRow(
   if (error) throw new Error(`payment_contracts update failed: ${error.message}`);
 }
 
+/**
+ * 「申込未完了」の契約IDを返す。初回登録取引 (kind=initial) が1件も成功していない契約
+ * = 3DS 認証で離脱した・認証に失敗した等で決済登録まで到達していない申込。
+ *
+ * これらは再申込を可能にするため canceled_at が入るが「解約」ではない。
+ * CSV出力・連携シートへの書き出しから外すのに使う
+ * (エントリーしていない案件を解約として先方へ流さないため)。
+ *
+ * 判定できない場合 (クエリ失敗) は空集合 = 誰も除外しない — 取りこぼしを作らない。
+ */
+export async function getIncompleteContractIds(ids: string[]): Promise<Set<string>> {
+  const skip = new Set<string>();
+  if (!ids.length) return skip;
+  const service = createSupabaseService();
+  const { data, error } = await service
+    .from("payment_charges")
+    .select("contract_id, ok")
+    .eq("kind", "initial")
+    .in("contract_id", ids);
+  if (error) return skip;
+  const hasSuccess = new Set<string>();
+  const seen = new Set<string>();
+  for (const r of data ?? []) {
+    const cid = String((r as any).contract_id);
+    seen.add(cid);
+    if ((r as any).ok === true) hasSuccess.add(cid);
+  }
+  for (const cid of seen) if (!hasSuccess.has(cid)) skip.add(cid);
+  return skip;
+}
+
 /** 解約済み (canceled_at あり) の契約を解約日の昇順で返す。
- *  連携スプレッドシート「解約」タブの未記録分を書き出すために使う。 */
+ *  連携スプレッドシートの退会日を後から埋め直すために使う。 */
 export async function listCanceledContracts(limit = 5000): Promise<ContractRow[]> {
   const service = createSupabaseService();
   const { data, error } = await service

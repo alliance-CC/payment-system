@@ -221,13 +221,15 @@ export default async function AdminBoardPage({
             {testMsg[testRes].text}
           </div>
         )}
-        {/* 解約はできたが連携スプレッドシートに書けなかった場合の警告 */}
+        {/* 解約と課金停止はできたが、シートに退会日を書けなかった場合の警告。
+            先方は退会日を見て在籍を判断するため、ここを見落とすと解約が伝わらない */}
         {searchParams.cancel === "nosheet" && (
           <div className="card p-3 text-sm text-bad">
-            解約は完了しましたが、連携スプレッドシートの「解約」タブに記録できませんでした。
+            解約と課金停止は完了しましたが、連携スプレッドシート「エントリー」タブの
+            <b>退会日を記入できませんでした</b>（このままでは先方の表に解約が反映されません）。
             {searchParams.cerr ? <span className="block mt-1 font-mono text-xs break-all">理由: {searchParams.cerr}</span> : null}
             <span className="block mt-1">
-              シートの共有設定とタブ名をご確認のうえ、課金設定の「解約の記録漏れを補う」で復旧できます。
+              シートの共有設定とタブ名をご確認のうえ、課金設定の「退会日の記録漏れを補う」で復旧できます。
             </span>
           </div>
         )}

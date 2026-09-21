@@ -5,7 +5,7 @@ import { loadPlans } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { loadPaymentSettings, DEFAULT_WELCOME_SUBJECT, DEFAULT_WELCOME_BODY } from "@/features/payments/payment-settings";
 import {
-  saveSettingsAction, testSheetAction, testMailAction, backfillCancelSheetAction,
+  saveSettingsAction, testSheetAction, testMailAction, backfillWithdrawalDatesAction,
 } from "../actions";
 import PartnerAccessPanel from "./PartnerAccessPanel";
 import { headers } from "next/headers";
@@ -22,8 +22,8 @@ export default async function SettingsPage({ searchParams }: {
     mail?: string; merr?: string; mto?: string; mvia?: string;
     // 外部ダッシュボードのパスワード保存結果 (savePartnerPasswordAction からのクエリ)
     partner?: string; perr?: string;
-    // 解約タブの未記録分の書き出し結果 (backfillCancelSheetAction からのクエリ)
-    bf?: string; bfw?: string; bfs?: string; bfd?: string; bferr?: string;
+    // 退会日の埋め直し結果 (backfillWithdrawalDatesAction からのクエリ)
+    bf?: string; bfd?: string; bfn?: string; bferr?: string;
   };
 }) {
   requireAdmin();
@@ -229,27 +229,30 @@ export default async function SettingsPage({ searchParams }: {
               )}
             </div>
 
-            {/* 解約タブの復旧: タブ名の相違や一時的な障害で書けなかった解約を後から回収する */}
+            {/* 退会日の復旧: 一時的な障害等で書けなかった解約を後から回収する */}
             <div className="rounded-lg border border-border p-3 space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <div>
-                  <div className="label">解約の記録漏れを補う</div>
+                  <div className="label">退会日の記録漏れを補う</div>
                   <p className="text-[10px] text-muted">
-                    エントリータブの「退会日」を解約済みの全案件について埋め直し、
-                    「解約」タブに載っていない解約があれば追記します。
-                    既にある行（顧客ID＋解約日が同じ）は書かないので、何度押しても重複しません。
+                    解約済みの全案件について、エントリータブの「退会日」を埋め直します。
+                    同じ値を上書きするだけなので、何度押しても重複しません
+                    （申込未完了の案件は解約ではないため対象外です）。
                   </p>
                 </div>
-                <button formAction={backfillCancelSheetAction} formNoValidate className="btn text-xs py-1">
+                <button formAction={backfillWithdrawalDatesAction} formNoValidate className="btn text-xs py-1">
                   記録漏れを補う
                 </button>
               </div>
               {searchParams.bf === "1" && (
                 <div className="text-[12px] text-good">
                   ✅ 退会日を {searchParams.bfd} 件に記入しました
-                  {searchParams.bfw && searchParams.bfw !== "0"
-                    ? ` — 解約タブに ${searchParams.bfw} 件を追記（記録済みのため書かなかったもの: ${searchParams.bfs} 件）`
-                    : "（解約タブは全て記録済みでした）"}
+                  {searchParams.bfn && searchParams.bfn !== "0" ? (
+                    <div className="mt-0.5 text-bad">
+                      ⚠️ {searchParams.bfn} 件はエントリータブに行が見つからず記入できませんでした
+                      （エントリーCSVの内容をシートに追加してから、もう一度お試しください）
+                    </div>
+                  ) : null}
                 </div>
               )}
               {searchParams.bf === "0" && (

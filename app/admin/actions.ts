@@ -51,7 +51,7 @@ export async function cancelAction(formData: FormData): Promise<void> {
   if (!accountId) redirect(backToBoard(formData));
 
   const res = await cancelSubscription(accountId);
-  // 連携スプレッドシートへ書けなかった場合はその旨も表示する。
+  // エントリータブの「退会日」を書けなかった場合はその旨も表示する。
   // 黙って進むと「解約したのにシートに載っていない」ことに気づけない。
   redirect(backToBoard(formData,
     res.sheetOk === false
@@ -59,22 +59,20 @@ export async function cancelAction(formData: FormData): Promise<void> {
       : {}));
 }
 
-// 解約の記録漏れをまとめて補う (課金設定のボタン)。
-//   ・エントリータブの「退会日」を全ての解約済み案件について埋め直す
-//   ・解約タブに載っていない解約だけを追記する
-// 既に載っている分は書かないので、何度押しても重複しない。
-export async function backfillCancelSheetAction(): Promise<void> {
+// 退会日の記録漏れをまとめて補う (課金設定のボタン)。
+//   解約済みの全案件について、エントリータブの「退会日」を書き直す。
+//   同じ値の上書きなので、何度押しても重複しない。
+export async function backfillWithdrawalDatesAction(): Promise<void> {
   requireAdmin();
-  const { backfillCancelSheet } = await import("@/features/payments/billing");
-  const r = await backfillCancelSheet().catch((e: any) => ({
-    ok: false, written: 0, skipped: 0, withdrawalFilled: 0, error: String(e?.message ?? e),
+  const { backfillWithdrawalDates } = await import("@/features/payments/billing");
+  const r = await backfillWithdrawalDates().catch((e: any) => ({
+    ok: false, filled: 0, notFound: 0, skipped: 0, error: String(e?.message ?? e),
   }));
 
   const q = new URLSearchParams({
     bf: r.ok ? "1" : "0",
-    bfw: String(r.written),
-    bfs: String(r.skipped),
-    bfd: String(r.withdrawalFilled),
+    bfd: String(r.filled),
+    bfn: String(r.notFound),
   });
   if (!r.ok && r.error) q.set("bferr", r.error.slice(0, 200));
   redirect(`/admin/settings?${q.toString()}`);

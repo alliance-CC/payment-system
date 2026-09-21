@@ -1,9 +1,13 @@
-// 連携スプレッドシート (①②③)。1つのスプレッドシートに3タブを持つ:
+// 連携スプレッドシート (①②③)。1つのスプレッドシートに2タブを使う:
 //   "エントリー"    … 申込が成立した (決済登録が完了し「利用前」になった) 時点で1件書き込む (①)。
 //                     3DS 認証で離脱した等の「申込未完了」は書かない — 課金されない申込を
 //                     成立した申込と同じ行として残さないため。
+//                     解約したら、その行の H列「退会日」に解約日を書き足す (③)。
 //   "ライセンスキー" … A列=ウイルスバスターのライセンスキー / B列=付与先の会員ID (②)
-//   "解約"          … 解約時に1件書き込む (③)
+//
+// 解約の記録はエントリータブの「退会日」1か所に集約している。月別の「2026.8解約」タブは
+// シート側の GAS が退会日から作るため、アプリから別タブへ書き込むことはしない
+// (二重管理になり、どちらが正か分からなくなるため)。
 //
 // 認証は既存の Sheets サービスアカウントを流用:
 //   GOOGLE_SHEETS_CLIENT_EMAIL / GOOGLE_SHEETS_PRIVATE_KEY (改行は \n)
@@ -17,7 +21,6 @@ import { loadPaymentSettings } from "./payment-settings";
 import { normalizeGooglePrivateKey, isValidPrivateKey, PRIVATE_KEY_HELP } from "./google-key";
 
 export const ENTRY_TAB = "エントリー";
-export const CANCEL_TAB = "解約";
 export const LICENSE_TAB = "ライセンスキー";
 
 /** エントリータブの1行 (項目順 A〜I) */
@@ -40,15 +43,6 @@ const ENTRY_COL = {
   chargeStartDate: 4,   // D
   withdrawalDate: 8,    // H
 } as const;
-
-/** 解約タブの1行 (画像2の項目順 A〜E) */
-export type CancelSheetRow = {
-  customerId: string;       // A 顧客ID
-  contractDate: string;     // B ご契約日
-  serviceStartDate: string; // C ご利用開始日
-  canceledDate: string;     // D 解約日
-  serviceName: string;      // E ご加入サービス名
-};
 
 type SheetsClient = Awaited<ReturnType<typeof getSheets>> extends infer T
   ? T extends null ? never : NonNullable<T> : never;
@@ -155,41 +149,57 @@ export async function appendEntryRow(row: EntrySheetRow): Promise<"written" | "d
   }
 }
 
-/**
- * ③補足 エントリータブ H列「退会日」を後から記入する (非ブロッキング)。
- * 解約タブへの記録とは別に、エントリー行そのものにも退会日を残す
- * (先方はエントリー表を見て在籍を判断するため、解約タブだけだと突き合わせが要る)。
- * 該当する顧客IDの行が無ければ何もしない。
- */
-export async function updateEntryWithdrawalDate(customerId: string, canceledDate: string): Promise<void> {
-  await writeEntryCell(customerId, ENTRY_COL.withdrawalDate, [canceledDate], "withdrawal date");
+export type SheetWriteResult =
+  | { ok: true }
+  | { ok: false; reason: "disabled" }            // 連携が未設定 (シートID/認証情報なし)
+  | { ok: false; reason: "no-row"; error: string } // エントリータブに該当の顧客IDが無い
+  | { ok: false; reason: "error"; error: string };
+
+/** 書けなかった理由を、管理画面にそのまま出せる日本語にする。 */
+export function describeSheetFailure(r: SheetWriteResult): string | undefined {
+  if (r.ok) return undefined;
+  if (r.reason === "disabled") return "連携スプレッドシートが未設定です";
+  return r.error;
 }
 
 /**
- * エントリータブの C列「ご利用開始日」と D列「課金開始日」を書き直す (非ブロッキング)。
+ * ③ 解約をエントリータブ H列「退会日」に記入する。
+ *
+ * 解約の記録はここ1か所だけ。月別の「2026.8解約」タブはシート側の GAS が
+ * この退会日から作るので、書けていないと先方の表に解約が出ない。
+ * そのため結果を呼び出し側へ返す — 握りつぶすと誰も記録漏れに気づけない。
+ */
+export async function updateEntryWithdrawalDate(
+  customerId: string, canceledDate: string,
+): Promise<SheetWriteResult> {
+  return writeEntryCell(customerId, ENTRY_COL.withdrawalDate, [canceledDate], "withdrawal date");
+}
+
+/**
+ * エントリータブの C列「ご利用開始日」と D列「課金開始日」を書き直す。
  * 管理画面で利用開始日を変更したとき、シート側の日付を古いまま残さないため。
  */
 export async function updateEntryServiceDates(
   customerId: string, serviceStartDate: string, chargeStartDate: string,
-): Promise<void> {
+): Promise<SheetWriteResult> {
   // C と D は隣接しているので1回の更新で書ける
-  await writeEntryCell(
+  return writeEntryCell(
     customerId, ENTRY_COL.serviceStartDate, [serviceStartDate, chargeStartDate], "service dates",
   );
 }
 
 /**
  * エントリータブの該当行 (顧客IDで検索) の、指定列から右へ values を書き込む。
- * 行が無ければ何もしない。失敗しても呼び出し元の処理は止めない。
+ * 失敗しても例外は投げない (呼び出し元の処理は止めない) が、結果は必ず返す。
  */
 async function writeEntryCell(
   customerId: string, startCol: number, values: string[], label: string,
-): Promise<void> {
+): Promise<SheetWriteResult> {
+  const key = (customerId ?? "").trim();
+  if (!key) return { ok: false, reason: "error", error: "会員IDが空です" };
   try {
-    const key = (customerId ?? "").trim();
-    if (!key) return;
     const client = await getSheets();
-    if (!client) return;
+    if (!client) return { ok: false, reason: "disabled" };
     const { sheets, spreadsheetId } = client;
 
     const col = await sheets.spreadsheets.values.get({
@@ -201,7 +211,15 @@ async function writeEntryCell(
     for (let i = 1; i < rows.length; i++) {                 // 1行目は見出し
       if (String(rows[i]?.[0] ?? "").trim() === key) { target = i + 1; break; }
     }
-    if (target === -1) return;                              // エントリー行が無い = 書く先が無い
+    if (target === -1) {
+      // 書く先が無い。申込時にシート連携が未設定だった / A列を編集した等で起こる。
+      // 黙って成功扱いにすると記録漏れに気づけないため、理由として返す。
+      console.error(`[entry-sheet] ${label}: エントリータブに行がありません:`, key);
+      return {
+        ok: false, reason: "no-row",
+        error: `エントリータブに会員ID ${key} の行がありません`,
+      };
+    }
 
     const from = String.fromCharCode(64 + startCol);
     const to = String.fromCharCode(64 + startCol + values.length - 1);
@@ -211,77 +229,11 @@ async function writeEntryCell(
       valueInputOption: "USER_ENTERED",
       requestBody: { values: [values] },
     });
-  } catch (e: any) {
-    console.error(`[entry-sheet] ${label} write failed:`, String(e?.message ?? e));
-  }
-}
-
-export type SheetWriteResult =
-  | { ok: true }
-  | { ok: false; reason: "disabled" }            // 連携が未設定 (シートID/認証情報なし)
-  | { ok: false; reason: "error"; error: string };
-
-/** ③ 解約を解約タブへ記録する (解約処理自体はブロックしない)。
- *  書けなかった理由は呼び出し側へ返す — ここで握りつぶすと、解約したのに
- *  シートに載っていないことに誰も気づけない。 */
-export async function appendCancelRow(row: CancelSheetRow): Promise<SheetWriteResult> {
-  try {
-    const client = await getSheets();
-    if (!client) return { ok: false, reason: "disabled" };
-    await writeToFirstEmptyRow(client, CANCEL_TAB, [
-      row.customerId, row.contractDate, row.serviceStartDate, row.canceledDate, row.serviceName,
-    ]);
     return { ok: true };
   } catch (e: any) {
     const error = String(e?.message ?? e);
-    console.error("[entry-sheet] cancel write failed:", error);
+    console.error(`[entry-sheet] ${label} write failed:`, error);
     return { ok: false, reason: "error", error };
-  }
-}
-
-/** シート上の日付表記 (2026/08/20 等) を YYYY-MM-DD に寄せる (突合用) */
-function normalizeSheetDate(v: unknown): string {
-  const s = String(v ?? "").trim();
-  const m = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/.exec(s);
-  return m ? `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}` : s;
-}
-
-/** 解約タブに既に載っている内容 (未記録分の書き出しで重複を避けるために使う) */
-export type CancelSheetKeys = {
-  /** 「顧客ID|解約日(YYYY-MM-DD)」の組 */
-  pairs: Set<string>;
-  /** 解約日を日付として読み取れなかった行の顧客ID。
-   *  日付で突合できないので、この顧客は「記録済み」とみなして書き足さない
-   *  (シートの日付表記が想定外でも、重複行を作らないようにするための安全側の判定)。 */
-  unparsedIds: Set<string>;
-};
-
-/**
- * 解約タブの記録済みキーを読む。
- * 取得できない場合は null = 判定できないので書き出しは行わない (重複を作らない)。
- */
-export async function loadCancelSheetKeys(): Promise<CancelSheetKeys | null> {
-  try {
-    const client = await getSheets();
-    if (!client) return null;
-    const res = await client.sheets.spreadsheets.values.get({
-      spreadsheetId: client.spreadsheetId,
-      range: `${CANCEL_TAB}!A1:D100000`,
-    });
-    const rows: any[][] = res?.data?.values ?? [];
-    const pairs = new Set<string>();
-    const unparsedIds = new Set<string>();
-    for (let i = 1; i < rows.length; i++) {          // 1行目は見出し
-      const id = String(rows[i]?.[0] ?? "").trim();
-      if (!id) continue;
-      const date = normalizeSheetDate(rows[i]?.[3]);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(date)) pairs.add(`${id}|${date}`);
-      else unparsedIds.add(id);
-    }
-    return { pairs, unparsedIds };
-  } catch (e: any) {
-    console.error("[entry-sheet] cancel keys read failed:", String(e?.message ?? e));
-    return null;
   }
 }
 
@@ -389,7 +341,8 @@ export async function testSheetConnection(overrideSheetId?: string): Promise<She
     // 1・2. シートを開いてタブ名を取得 (共有されていなければここで 403)
     const meta = await sheets.spreadsheets.get({ spreadsheetId, fields: "properties.title,sheets.properties.title" });
     const tabs: string[] = (meta?.data?.sheets ?? []).map((s: any) => s?.properties?.title).filter(Boolean);
-    const missingTabs = [ENTRY_TAB, CANCEL_TAB, LICENSE_TAB].filter((t) => !tabs.includes(t));
+    // 解約タブはアプリから読み書きしないので必須にしない (解約は「エントリー」の退会日に記録する)
+    const missingTabs = [ENTRY_TAB, LICENSE_TAB].filter((t) => !tabs.includes(t));
 
     // 3. 書き込み確認: ライセンスキータブの未使用セルに書いて即クリアする
     let canWrite = false;

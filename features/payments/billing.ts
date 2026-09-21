@@ -14,8 +14,8 @@ import { newAccountId, accountIdFromCaseId, isValidAccountId } from "./account";
 import { supabaseCrmAdapter, type ConsentRecord } from "./crm-adapter";
 import { appendSignupRow } from "./signup-sheet";
 import {
-  appendEntryRow, appendCancelRow, assignLicenseKey, updateEntryWithdrawalDate,
-  updateEntryServiceDates, loadCancelSheetKeys, type SheetWriteResult,
+  appendEntryRow, assignLicenseKey, updateEntryWithdrawalDate,
+  updateEntryServiceDates, describeSheetFailure, type SheetWriteResult,
 } from "./entry-sheet";
 import { formatPhoneJp } from "./phone";
 import {
@@ -24,7 +24,7 @@ import {
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
   insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey, getLicenseKeyMap,
   getChargeByOrderId, claimChargeFinalization, listInDoubt3dsCharges, hasUnfinishedInitialCharge,
-  listCanceledContracts, setServiceStartDate, hasChargedEver,
+  listCanceledContracts, setServiceStartDate, hasChargedEver, getIncompleteContractIds,
   type ContractRow,
 } from "./store";
 import {
@@ -1406,7 +1406,8 @@ export async function changeServiceStartDate(accountId: string, newDate: string)
 
 export async function cancelSubscription(accountId: string): Promise<{
   ok: boolean; error?: string; effectiveUntil?: string;
-  /** 連携スプレッドシート「解約」タブへ書けたか (書けなくても解約自体は成立) */
+  /** 連携スプレッドシートのエントリータブに「退会日」を書けたか
+   *  (書けなくても解約・課金停止自体は成立している) */
   sheetOk?: boolean; sheetError?: string;
 }> {
   const contract = await getContractByAccountId(accountId);
@@ -1440,56 +1441,43 @@ export async function cancelSubscription(accountId: string): Promise<{
     }).catch(() => {});
   }
 
-  // ③ 連携スプレッドシート「解約」タブへ記録 (非ブロッキング)。
+  // ③ 連携スプレッドシート: エントリータブの「退会日」に記入する (非ブロッキング)。
   //    解約日は解約手続き日 (有効期限 effectiveUntil ではなく手続きを行った日)。
-  const serviceStart = (await getServiceStartMap([contract.id]).catch(() => new Map()))
-    .get(contract.id) ?? null;
-  const sheet: SheetWriteResult = await appendCancelRow({
-    customerId: contract.account_id,
-    contractDate: jstDateOf(contract.started_at),
-    serviceStartDate: serviceStart ?? "",
-    canceledDate: todayJst(),
-    serviceName: contract.plan_name ?? contract.plan_id,
-  }).catch((e) => ({ ok: false as const, reason: "error" as const, error: String(e?.message ?? e) }));
+  //    先方はエントリー表で在籍を見ており、月別の「2026.8解約」タブもシート側の GAS が
+  //    この退会日から作る。ここが書けていないと解約が先方に伝わらないため、
+  //    結果は必ず呼び出し側 (管理画面) へ返す。
+  const sheet: SheetWriteResult = await updateEntryWithdrawalDate(contract.account_id, todayJst())
+    .catch((e) => ({ ok: false as const, reason: "error" as const, error: String(e?.message ?? e) }));
 
-  // エントリータブ側の「退会日」も埋める (先方はエントリー表で在籍を見るため)。
-  await updateEntryWithdrawalDate(contract.account_id, todayJst())
-    .catch((e) => console.error("[payments] entry withdrawal write failed:", String(e?.message ?? e)));
-
-  // 解約自体は成立している。シートに書けなかったことは管理画面が表示できるよう返す
+  // 解約・課金停止自体は成立している。シートに書けなかったことは管理画面が表示できるよう返す
   // — 黙って落とすと記録漏れに気づけない。
   return {
     ok: true,
     effectiveUntil,
     sheetOk: sheet.ok,
-    sheetError: sheet.ok
-      ? undefined
-      : sheet.reason === "disabled" ? "連携スプレッドシートが未設定です" : sheet.error,
+    sheetError: describeSheetFailure(sheet),
   };
 }
 
 /**
- * 解約の記録漏れを、あとからまとめて補う (管理画面の「解約の記録漏れを補う」)。
+ * 退会日の記録漏れを、あとからまとめて補う (管理画面の「退会日の記録漏れを補う」)。
  *
- * 2つを行う:
- *   ・エントリータブ H列「退会日」を埋める … 解約時に後追い記入する仕組みを入れる前に
- *     解約した案件は空欄のままなので、全ての解約済み案件に対して毎回書き直す
- *     (同じ値を上書きするだけなので何度実行しても害はない)
- *   ・解約タブに無い解約を追記する … 通常は解約時に書けているので何もしない。
- *     タブ名の相違や一時的な障害で書けなかった分だけが対象になる
+ * 解約済みの全案件について、エントリータブ H列「退会日」を書き直す。
+ * 同じ値を上書きするだけなので、何度押しても重複も副作用も起きない。
+ * (シート連携を後から設定した・一時的な障害で書けなかった分を回収するためのもの)
  *
- * 重複防止: 既に載っている「顧客ID + 解約日」は書かない。
- * シートの日付表記が想定外で読み取れない行は、その顧客を記録済みとみなして書き足さない
- * (突合できない状態で書くと重複行を作ってしまうため、安全側に倒す)。
+ * 対象外:
+ *   ・解約日が記録されていない契約
+ *   ・申込未完了 (3DS 離脱・認証失敗) — 再申込のため canceled_at は入るが「解約」ではなく、
+ *     そもそもエントリータブに行が無い。CSV出力と同じ判定で除外する。
+ *
+ * エントリータブに行が無い案件は notFound として数え、件数を管理画面に出す
+ * (書けなかったこと自体に気づけるようにするため)。
  */
-export async function backfillCancelSheet(): Promise<{
-  ok: boolean; written: number; skipped: number; withdrawalFilled: number; error?: string;
+export async function backfillWithdrawalDates(): Promise<{
+  ok: boolean; filled: number; notFound: number; skipped: number; error?: string;
 }> {
-  const empty = { written: 0, skipped: 0, withdrawalFilled: 0 };
-  const existing = await loadCancelSheetKeys();
-  if (existing === null) {
-    return { ok: false, ...empty, error: "解約タブを読めませんでした（シートの共有設定・タブ名をご確認ください）" };
-  }
+  const empty = { filled: 0, notFound: 0, skipped: 0 };
 
   let contracts: ContractRow[];
   try {
@@ -1498,40 +1486,26 @@ export async function backfillCancelSheet(): Promise<{
     return { ok: false, ...empty, error: String(e?.message ?? e) };
   }
 
-  const ssMap = await getServiceStartMap(contracts.map((c) => c.id)).catch(() => new Map());
-  let written = 0;
+  // 申込未完了は「解約」ではないので触らない (先方の表に出してはいけない)
+  const incomplete = await getIncompleteContractIds(contracts.map((c) => c.id))
+    .catch(() => new Set<string>());
+
+  let filled = 0;
+  let notFound = 0;
   let skipped = 0;
-  let withdrawalFilled = 0;
 
   for (const c of contracts) {
     const canceledDate = jstDateOf(c.canceled_at ?? null);
-    if (!canceledDate) { skipped++; continue; }
+    if (!canceledDate || incomplete.has(c.id)) { skipped++; continue; }
 
-    // ① エントリー行の退会日は、解約タブの状態に関わらず必ず埋め直す
-    const filled = await updateEntryWithdrawalDate(c.account_id, canceledDate)
-      .then(() => true).catch(() => false);
-    if (filled) withdrawalFilled++;
+    const res = await updateEntryWithdrawalDate(c.account_id, canceledDate)
+      .catch((e: any) => ({ ok: false as const, reason: "error" as const, error: String(e?.message ?? e) }));
 
-    // ② 解約タブは「無いものだけ」追記する
-    if (existing.pairs.has(`${c.account_id}|${canceledDate}`)
-      || existing.unparsedIds.has(c.account_id)) { skipped++; continue; }
-
-    const res = await appendCancelRow({
-      customerId: c.account_id,
-      contractDate: jstDateOf(c.started_at),
-      serviceStartDate: ssMap.get(c.id) ?? "",
-      canceledDate,
-      serviceName: c.plan_name ?? c.plan_id,
-    });
-    if (!res.ok) {
-      return {
-        ok: false, written, skipped, withdrawalFilled,
-        error: res.reason === "disabled" ? "連携スプレッドシートが未設定です" : res.error,
-      };
-    }
-    existing.pairs.add(`${c.account_id}|${canceledDate}`);   // 同一実行内での二重書き込みも防ぐ
-    written++;
+    if (res.ok) { filled++; continue; }
+    if (res.reason === "no-row") { notFound++; continue; }
+    // 未設定・APIエラーは案件ごとの問題ではないので、そこで打ち切って原因を返す
+    return { ok: false, filled, notFound, skipped, error: describeSheetFailure(res) };
   }
 
-  return { ok: true, written, skipped, withdrawalFilled };
+  return { ok: true, filled, notFound, skipped };
 }
