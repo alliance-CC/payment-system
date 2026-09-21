@@ -10,6 +10,7 @@ import {
 } from "./store";
 import { formatPhoneJp } from "./phone";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom } from "./billing-config";
+import { fetchAllPages } from "./db-paging";
 
 export type EntryExportRow = {
   accountId: string;
@@ -67,18 +68,22 @@ function splitName(full: string | null): { last: string; first: string } {
 export async function loadEntryExport(from: string, to: string): Promise<EntryExportRow[]> {
   const svc = createSupabaseService();
   const { gte, lt } = jstRangeToUtc(from, to);
-  const { data, error } = await svc
-    .from("payment_contracts")
-    .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
-    // 解約済みは新規エントリーとして渡さない。解約は解約CSV(解約日軸)の担当。
-    // これを入れないと、申込月を後から出力し直したときに解約者まで新規として並ぶ。
-    .is("canceled_at", null)
-    .gte("started_at", gte)
-    .lt("started_at", lt)
-    .order("started_at", { ascending: true });
-  if (error) throw new Error(`payment_contracts export query failed: ${error.message}`);
-
-  const all = data ?? [];
+  // 期間内の件数が1000を超えても取りこぼさないよう全ページ読む。
+  // 範囲取得なので、並び順は申込日だけでなく id まで含めて一意にする。
+  const all = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
+      // 解約済みは新規エントリーとして渡さない。解約は解約CSV(解約日軸)の担当。
+      // これを入れないと、申込月を後から出力し直したときに解約者まで新規として並ぶ。
+      .is("canceled_at", null)
+      .gte("started_at", gte)
+      .lt("started_at", lt)
+      .order("started_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts export query",
+  );
   const allIds = all.map((r: any) => r.id);
   // 認証失敗・離脱で残った未成立の契約は出力しない
   const skip = await getIncompleteContractIds(allIds);
@@ -113,16 +118,18 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
 export async function loadCancelExport(from: string, to: string): Promise<CancelExportRow[]> {
   const svc = createSupabaseService();
   const { gte, lt } = jstRangeToUtc(from, to);
-  const { data, error } = await svc
-    .from("payment_contracts")
-    .select("id, account_id, canceled_at")
-    .not("canceled_at", "is", null)
-    .gte("canceled_at", gte)
-    .lt("canceled_at", lt)
-    .order("canceled_at", { ascending: true });
-  if (error) throw new Error(`payment_contracts cancel export query failed: ${error.message}`);
-
-  const all = data ?? [];
+  const all = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, account_id, canceled_at")
+      .not("canceled_at", "is", null)
+      .gte("canceled_at", gte)
+      .lt("canceled_at", lt)
+      .order("canceled_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts cancel export query",
+  );
   // 3DS認証失敗・離脱の契約も canceled_at が入るが、これは「解約」ではないため除外する
   const skip = await getIncompleteContractIds(all.map((r: any) => r.id));
 
@@ -145,15 +152,17 @@ export async function loadCancelExport(from: string, to: string): Promise<Cancel
 export async function loadDataLoaderExport(from: string, to: string): Promise<DataLoaderExportRow[]> {
   const svc = createSupabaseService();
   const { gte, lt } = jstRangeToUtc(from, to);
-  const { data, error } = await svc
-    .from("payment_contracts")
-    .select("id, plan_name, plan_id, started_at, canceled_at")
-    .gte("started_at", gte)
-    .lt("started_at", lt)
-    .order("started_at", { ascending: true });
-  if (error) throw new Error(`payment_contracts dataloader export query failed: ${error.message}`);
-
-  const all = data ?? [];
+  const all = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, plan_name, plan_id, started_at, canceled_at")
+      .gte("started_at", gte)
+      .lt("started_at", lt)
+      .order("started_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts dataloader export query",
+  );
   const skip = await getIncompleteContractIds(all.map((r: any) => r.id));
   const rows = all.filter((r: any) => !skip.has(r.id));
 

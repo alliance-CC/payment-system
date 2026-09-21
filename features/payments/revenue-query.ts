@@ -2,6 +2,7 @@ import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap } from "./store";
 import { loadBillingPolicy, firstChargeDate, todayJst } from "./billing-config";
+import { fetchAllPages, fetchAllByIds } from "./db-paging";
 
 // 売上予測ボードの集計 (クレジットカードのみ)。カード等の決済個人情報は含めない (§7)。
 //   予定(projected) … その月に課金対象となる契約の月額合計 (継続課金の見込み)
@@ -42,22 +43,33 @@ export async function loadRevenue(opts: { month: string }): Promise<RevenueBoard
   const year = parseInt(month.slice(0, 4), 10);
   const curMonth = todayJst().slice(0, 7);
 
-  const { data: contracts } = await svc
-    .from("payment_contracts")
-    .select("id, account_id, plan_name, plan_id, amount, status, started_at, canceled_at, contact_name");
-  const rowsRaw = contracts ?? [];
+  // 1000件で頭打ちにならないよう全ページ読む (一部の契約が集計から漏れないように)。
+  // 範囲取得なので一意なキー (id) で並べる。
+  const rowsRaw = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, account_id, plan_name, plan_id, amount, status, started_at, canceled_at, contact_name")
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts revenue query",
+  );
   const ids = rowsRaw.map((c: any) => c.id);
   const ssMap = await getServiceStartMap(ids);
 
   // 当年の課金成功額 (確定) を月×契約で集計
-  const { data: charges } = ids.length
-    ? await svc.from("payment_charges")
-        .select("contract_id, charge_month, amount, ok")
-        .gte("charge_month", `${year}-01`).lte("charge_month", `${year}-12`)
-        .in("contract_id", ids)
-    : { data: [] as any[] };
+  // 1年分 × 全契約なので、URL長・行数の両方に対応して分割 + ページングで取る
+  const charges = await fetchAllByIds<any>(
+    ids,
+    (part, from, to) => svc.from("payment_charges")
+      .select("contract_id, charge_month, amount, ok")
+      .gte("charge_month", `${year}-01`).lte("charge_month", `${year}-12`)
+      .in("contract_id", part)
+      .order("id", { ascending: true })      // 範囲取得のため一意なキーで並べる
+      .range(from, to),
+    "payment_charges revenue query",
+  );
   const confirmedByMonth = new Map<string, Map<string, number>>();
-  for (const ch of charges ?? []) {
+  for (const ch of charges) {
     if ((ch as any).ok !== true) continue;
     const m = (ch as any).charge_month as string;
     if (!confirmedByMonth.has(m)) confirmedByMonth.set(m, new Map());

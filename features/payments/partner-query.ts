@@ -11,9 +11,7 @@ import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import { getServiceStartMap } from "./store";
 import { firstChargeDate } from "./billing-config";
-
-/** 1回のクエリで読む行数。Supabase 既定の上限 (1000) に合わせる。 */
-const PAGE = 1000;
+import { fetchAllPages } from "./db-paging";
 
 export type PartnerRow = {
   accountId: string;        // 会員ID (連携シートの「顧客ID」と同じ値)
@@ -57,29 +55,25 @@ export function filterByContractMonth(rows: PartnerRow[], month: string): Partne
 export async function loadPartnerBoard(): Promise<PartnerBoard> {
   const notReady: PartnerBoard = { rows: [], months: [], notReady: true };
 
-  const all: any[] = [];
+  let all: any[] = [];
   try {
     const svc = createSupabaseService();     // 環境変数が未設定だとここで throw する
     // Supabase は1リクエストの返却行数に上限 (既定1000) があり、超えると黙って
     // 切り捨てられる。件数が増えても取りこぼさないようページングして全件読む。
-    for (let from = 0; ; from += PAGE) {
-      const res = await svc
+    // 範囲取得なので、並び順は契約日だけでなく id まで含めて一意にする。
+    all = await fetchAllPages<any>(
+      (from, to) => svc
         .from("payment_contracts")
         .select("id, account_id, plan_name, plan_id, started_at, canceled_at, contact_name, entered_at")
         .not("entered_at", "is", null)
         .order("started_at", { ascending: true })
-        .range(from, from + PAGE - 1);
-      if (res.error) {
-        // entered_at 列が無い (p004 未適用) 等
-        console.error("[partner] query failed:", res.error.message);
-        return notReady;
-      }
-      const page = res.data ?? [];
-      all.push(...page);
-      if (page.length < PAGE) break;
-    }
+        .order("id", { ascending: true })
+        .range(from, to),
+      "partner board query",
+    );
   } catch (e: any) {
-    console.error("[partner] query threw:", String(e?.message ?? e));
+    // entered_at 列が無い (p004 未適用)・DB不通 等
+    console.error("[partner] query failed:", String(e?.message ?? e));
     return notReady;
   }
 

@@ -5,6 +5,7 @@ import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom, todayJst } fro
 import {
   filterByScope, filterByStatus, filterByQuery, isAppliedIn, isEntryTodo, type BoardScope,
 } from "./admin-filter";
+import { fetchAllPages, fetchAllByIds } from "./db-paging";
 
 // 登録者管理ボードの1行 (カード等の決済個人情報は一切含めない §7)。
 export type RegistrantRow = {
@@ -56,13 +57,17 @@ export async function loadBoard(
   const today = todayJst();
   const month = opts.month;
 
-  const { data: contracts, error } = await svc
-    .from("payment_contracts")
-    .select("id, account_id, plan_name, plan_id, payment_method, status, started_at, next_charge_date, canceled_at, contact_name, contact_phone, contact_email")
-    .order("started_at", { ascending: false });
-  if (error) throw new Error(`payment_contracts query failed: ${error.message}`);
-
-  const rowsRaw = contracts ?? [];
+  // 1000件で頭打ちにならないよう全ページ読む。範囲取得なので、並び順は
+  // started_at だけでなく id まで含めて一意にする (ページ境界での重複・欠落を防ぐ)。
+  const rowsRaw = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, account_id, plan_name, plan_id, payment_method, status, started_at, next_charge_date, canceled_at, contact_name, contact_phone, contact_email")
+      .order("started_at", { ascending: false })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts query",
+  );
   const ids = rowsRaw.map((c: any) => c.id);
 
   // 利用開始日 (選択値。列 p001 未適用なら空 → 申込日から推定)
@@ -74,37 +79,53 @@ export async function loadBoard(
   // SAF案件番号 (列 p005 未適用なら空 → 入力欄が空で表示される)
   const safMap = await getSafCaseNoMap(ids);
 
-  // 同意記録の有無 (account_id 単位)
-  const { data: consents } = await svc.from("payment_consents").select("account_id");
-  const consentSet = new Set((consents ?? []).map((c: any) => c.account_id));
+  // 同意記録の有無 (account_id 単位)。
+  // 1000件で切れると、同意済みの人が「未同意」と表示されてしまうので全件読む。
+  const consents = await fetchAllPages<any>(
+    (from, to) => svc.from("payment_consents").select("account_id")
+      .order("account_id", { ascending: true }).range(from, to),
+    "payment_consents query",
+  );
+  const consentSet = new Set(consents.map((c: any) => c.account_id));
 
   // 申込が完了していない契約: 初回登録取引 (kind=initial) が未確定 (ok=null) のまま
   // 残っている = 3DS 認証画面での離脱・結果不明などで決済登録まで到達していない。
   // 対象月に関係なく判定する (申込月を過ぎても未完了は未完了のため)。
-  const pendingInitial = new Set<string>();
-  if (ids.length) {
-    const { data: pend } = await svc
+  // 契約IDをまとめてURLに載せるとURL長・行数の両方で上限に当たるため、
+  // 分割 + ページングで全件取る (取りこぼすと「申込未完了」を見落とす)。
+  const pend = await fetchAllByIds<any>(
+    ids,
+    (part, from, to) => svc
       .from("payment_charges")
       .select("contract_id")
       .is("ok", null)
       .eq("kind", "initial")
-      .in("contract_id", ids);
-    for (const p of pend ?? []) pendingInitial.add((p as any).contract_id);
-  }
+      .in("contract_id", part)
+      .order("id", { ascending: true })      // 範囲取得のため一意なキーで並べる
+      .range(from, to),
+    "payment_charges pending query",
+  );
+  const pendingInitial = new Set<string>(pend.map((p: any) => p.contract_id));
 
-  // 対象月の課金結果 (contract_id 単位に集約)
-  const chargesByContract = new Map<string, { ok: boolean | null }[]>();
-  if (ids.length) {
-    const { data: charges } = await svc
+  // 対象月の課金結果 (contract_id 単位に集約)。
+  // 1件の契約に複数の試行がぶら下がるので、こちらもページングが要る
+  // (取りこぼすと課金済みなのに「未課金」と表示される)。
+  const charges = await fetchAllByIds<any>(
+    ids,
+    (part, from, to) => svc
       .from("payment_charges")
       .select("contract_id, ok")
       .eq("charge_month", month)
-      .in("contract_id", ids);
-    for (const ch of charges ?? []) {
-      const arr = chargesByContract.get((ch as any).contract_id) ?? [];
-      arr.push({ ok: (ch as any).ok });
-      chargesByContract.set((ch as any).contract_id, arr);
-    }
+      .in("contract_id", part)
+      .order("id", { ascending: true })      // 範囲取得のため一意なキーで並べる
+      .range(from, to),
+    "payment_charges month query",
+  );
+  const chargesByContract = new Map<string, { ok: boolean | null }[]>();
+  for (const ch of charges) {
+    const arr = chargesByContract.get((ch as any).contract_id) ?? [];
+    arr.push({ ok: (ch as any).ok });
+    chargesByContract.set((ch as any).contract_id, arr);
   }
 
   const rows: RegistrantRow[] = rowsRaw.map((c: any) => {
