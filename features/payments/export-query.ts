@@ -84,6 +84,11 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
       .range(from, to),
     "payment_contracts export query",
   );
+  return toEntryRows(all);
+}
+
+// 申込の行 → エントリーCSVの行。申込未完了を除いて、利用開始日・ライセンスキーを付ける。
+async function toEntryRows(all: any[]): Promise<EntryExportRow[]> {
   const allIds = all.map((r: any) => r.id);
   // 認証失敗・離脱で残った未成立の契約は出力しない
   const skip = await getIncompleteContractIds(allIds);
@@ -112,6 +117,34 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
       mobilePhone: formatPhoneJp(r.contact_phone),   // 先方へはハイフン付きで統一
     };
   });
+}
+
+/**
+ * エンカンAI用：まだ「エントリー済み」になっていない案件 (申込日の昇順)。
+ * 管理ボードの「未エントリー」と同じ考え方 — 解約・申込未完了は出さない。
+ *
+ * since (YYYY-MM-DD) より前の申込は見ない。
+ * ⚠️ entered_at は後から足した列なので、それより前の案件は先方へ入れてあっても空のまま
+ *    残っていることがある。区切りが無いと、古い案件を先方へもう一度入れてしまう
+ *    (先方は同じエントリーを2件として取り込む)。
+ */
+export async function loadEntryTodoExport(since: string): Promise<EntryExportRow[]> {
+  const svc = createSupabaseService();
+  const { gte } = jstRangeToUtc(since, since);
+  const all = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
+      .is("entered_at", null)
+      .is("canceled_at", null)
+      .neq("status", "canceled")
+      .gte("started_at", gte)
+      .order("started_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts entry-todo query",
+  );
+  return toEntryRows(all);
 }
 
 /** ④-2 解約CSV: 解約日が [from, to] の案件 (解約日の昇順) */
