@@ -175,6 +175,37 @@ export async function loadCancelExport(from: string, to: string): Promise<Cancel
 }
 
 /**
+ * エンカンAI用：まだ「解約エントリー済み」になっていない解約 (解約日の昇順)。
+ * 入れ忘れた日の解約も次の回に拾えるよう、期間ではなく cancel_entered_at が空かで見る。
+ *
+ * since (YYYY-MM-DD) より前の解約は見ない (cancel_entered_at を記録する前の解約を、もう一度入れないため)。
+ * 申込未完了 (3DS離脱等) は解約ではないので出さない (loadCancelExport と同じ)。
+ */
+export async function loadCancelTodoExport(since: string): Promise<CancelExportRow[]> {
+  const svc = createSupabaseService();
+  const { gte } = jstRangeToUtc(since, since);
+  const all = await fetchAllPages<any>(
+    (from, to) => svc
+      .from("payment_contracts")
+      .select("id, account_id, canceled_at")
+      .not("canceled_at", "is", null)
+      .is("cancel_entered_at", null)
+      .gte("canceled_at", gte)
+      .order("canceled_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to),
+    "payment_contracts cancel-todo query",
+  );
+  const skip = await getIncompleteContractIds(all.map((r: any) => r.id));
+  return all
+    .filter((r: any) => !skip.has(r.id))
+    .map((r: any) => ({
+      accountId: r.account_id ?? "",
+      canceledDate: jstDate(r.canceled_at),
+    }));
+}
+
+/**
  * ⑤ データローダ用CSV: 申込日が [from, to] の案件 (申込日の昇順)。
  *
  * ・SAF案件番号が入力済みの案件だけを出す
