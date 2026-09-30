@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
 import { cancelSubscription, changeServiceStartDate } from "@/features/payments/billing";
 import {
-  hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds,
+  hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds, setCancelEnteredByAccountIds,
   setSafCaseNo,
 } from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
@@ -155,6 +155,28 @@ export async function markEnteredAction(formData: FormData): Promise<void> {
   }
   redirect(backToBoard(formData, {
     entry: entered ? "ok" : "undo",
+    n: String(res.count),
+  }));
+}
+
+// 先方システムへの「解約エントリー済み」を一括で立てる / 外す。
+//   解約済みの案件だけが対象 (立てるときは store 側でも解約していない案件を除く)。
+//   決済・契約の状態には一切影響しない (cancel_entered_at という記録用の列を更新するだけ)。
+export async function markCancelEnteredAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountIds = formData.getAll("accountIds").map(String).filter(Boolean);
+  const entered = String(formData.get("entered") ?? "1") === "1";
+
+  if (!accountIds.length) redirect(backToBoard(formData, { select: "cancel", centry: "none" }));
+
+  const res = await setCancelEnteredByAccountIds(accountIds, entered);
+  if (!res.ok) {
+    redirect(backToBoard(formData, {
+      select: "cancel", centry: "err", eerr: (res.error ?? "unknown").slice(0, 200),
+    }));
+  }
+  redirect(backToBoard(formData, {
+    centry: entered ? "ok" : "undo",
     n: String(res.count),
   }));
 }

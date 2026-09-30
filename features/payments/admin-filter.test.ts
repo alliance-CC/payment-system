@@ -1,7 +1,7 @@
 // 管理ボードの絞り込みテスト。表示範囲(申込月/全案件)・タブ・検索の挙動を固定する。
 import { describe, it, expect } from "vitest";
 import {
-  parseScope, isAppliedIn, filterByScope, filterByStatus, filterByQuery, isEntryTodo,
+  parseScope, isAppliedIn, filterByScope, filterByStatus, filterByQuery, isEntryTodo, isCancelTodo,
 } from "./admin-filter";
 
 type Row = {
@@ -10,6 +10,8 @@ type Row = {
   statusLabel: string;
   billingAlert: boolean;
   enteredAt: string | null;
+  cancelTarget: boolean;
+  cancelEnteredAt: string | null;
   name: string | null;
   phone: string | null;
 };
@@ -19,6 +21,8 @@ const row = (o: Partial<Row> & { accountId: string }): Row => ({
   statusLabel: "利用中",
   billingAlert: false,
   enteredAt: null,
+  cancelTarget: false,
+  cancelEnteredAt: null,
   name: null,
   phone: null,
   ...o,
@@ -122,6 +126,24 @@ describe("未エントリーの判定", () => {
       row({ accountId: "MR-E", statusLabel: "利用前" }),               // 利用前・未 → 対象
     ];
     expect(filterByStatus(rows, "entry-todo").map((r) => r.accountId)).toEqual(["MR-A", "MR-E"]);
+  });
+});
+
+describe("解約未エントリーの判定", () => {
+  it("解約の対象で、解約エントリー済みでなければ作業待ち", () => {
+    expect(isCancelTodo({ cancelTarget: true, cancelEnteredAt: null })).toBe(true);
+    expect(isCancelTodo({ cancelTarget: true, cancelEnteredAt: "2026-09-30" })).toBe(false);
+    expect(isCancelTodo({ cancelTarget: false, cancelEnteredAt: null })).toBe(false);
+  });
+
+  it("cancel-todo タブは解約未エントリーだけを返す", () => {
+    const rows = [
+      row({ accountId: "MR-A", statusLabel: "解約", cancelTarget: true }),                                // 未 → 対象
+      row({ accountId: "MR-B", statusLabel: "解約", cancelTarget: true, cancelEnteredAt: "2026-09-30" }), // 済 → 対象外
+      row({ accountId: "MR-C", statusLabel: "解約" }),                                                    // 申込未完了の解約 → 対象外
+      row({ accountId: "MR-D" }),                                                                         // 利用中 → 対象外
+    ];
+    expect(filterByStatus(rows, "cancel-todo").map((r) => r.accountId)).toEqual(["MR-A"]);
   });
 });
 

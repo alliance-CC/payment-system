@@ -1,9 +1,12 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
-import { getServiceStartMap, getLicenseKeyMap, getEnteredMap, getSafCaseNoMap } from "./store";
+import {
+  getServiceStartMap, getLicenseKeyMap, getEnteredMap, getSafCaseNoMap, getCancelEnteredMap,
+  getIncompleteContractIds,
+} from "./store";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom, todayJst } from "./billing-config";
 import {
-  filterByScope, filterByStatus, filterByQuery, isAppliedIn, isEntryTodo, type BoardScope,
+  filterByScope, filterByStatus, filterByQuery, isAppliedIn, isEntryTodo, isCancelTodo, type BoardScope,
 } from "./admin-filter";
 import { fetchAllPages, fetchAllByIds } from "./db-paging";
 
@@ -25,6 +28,8 @@ export type RegistrantRow = {
   consented: boolean;       // 利用規約 同意済み
   licenseKey: string | null;// ウイルスバスターのライセンスキー (プレミアムのみ)
   enteredAt: string | null; // 先方システムへエントリー済みの日付 (YYYY-MM-DD, JST)。null = 未
+  cancelTarget: boolean;    // 先方へ解約を入れる対象か (解約済み・申込未完了ではない＝解約CSVに載る)
+  cancelEnteredAt: string | null; // 先方システムへ解約を入れた日付 (YYYY-MM-DD, JST)。null = 未
   safCaseNo: string;        // SAF案件番号 (現場が手入力。未入力は空文字)
   monthBilling: "正常" | "決済不備" | "確認中" | "未課金" | "課金予定" | "対象外";
   billingAlert: boolean;    // 決済不備・確認中・延滞・期限切れ等の要注意
@@ -37,7 +42,7 @@ export type Board = {
   // 件数は「表示範囲内」の集計 (一覧の行数と一致させる)
   counts: {
     total: number; active: number; before: number; canceled: number; incomplete: number;
-    alerts: number; entryTodo: number;
+    alerts: number; entryTodo: number; cancelTodo: number;
   };
   totalAll: number;         // 表示範囲に関わらない全案件数 (「全案件」ボタンの表示用)
   outOfScopeAlerts: number; // 表示範囲の外にある要注意の件数 (見落とし防止の告知用)
@@ -76,6 +81,11 @@ export async function loadBoard(
   const lkMap = await getLicenseKeyMap(ids);
   // エントリー済みの記録 (列 p004 未適用なら空 → 全件「未」表示)
   const enMap = await getEnteredMap(ids);
+  // 解約エントリー済みの記録 (列 p006 未適用なら空 → 解約は全件「未」表示)
+  const cenMap = await getCancelEnteredMap(ids);
+  // 解約CSVと同じく、申込未完了 (3DS離脱等) の解約は先方へ入れる対象にしない
+  const cancelSkip = await getIncompleteContractIds(
+    rowsRaw.filter((c: any) => c.canceled_at).map((c: any) => c.id));
   // SAF案件番号 (列 p005 未適用なら空 → 入力欄が空で表示される)
   const safMap = await getSafCaseNoMap(ids);
 
@@ -188,6 +198,8 @@ export async function loadBoard(
       consented: consentSet.has(c.account_id),
       licenseKey: lkMap.get(c.id) ?? null,
       enteredAt: jstDate(enMap.get(c.id) ?? null) || null,
+      cancelTarget: !!c.canceled_at && !cancelSkip.has(c.id),
+      cancelEnteredAt: jstDate(cenMap.get(c.id) ?? null) || null,
       safCaseNo: safMap.get(c.id) ?? "",
       monthBilling,
       billingAlert,
@@ -209,6 +221,7 @@ export async function loadBoard(
     incomplete: scoped.filter((r) => r.statusLabel === "申込未完了").length,
     alerts: scoped.filter((r) => r.billingAlert).length,
     entryTodo: scoped.filter(isEntryTodo).length,
+    cancelTodo: scoped.filter(isCancelTodo).length,
   };
 
   // 申込月で絞ると他月の要注意案件が画面から消えるため、件数だけは必ず伝える

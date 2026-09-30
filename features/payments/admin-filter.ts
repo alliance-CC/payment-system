@@ -41,14 +41,27 @@ export function isEntryTodo(r: { statusLabel: string; enteredAt: string | null }
   return r.statusLabel === "利用前" || r.statusLabel === "利用中";
 }
 
-/** ステータスタブでの絞り込み。"all" / 未指定は素通し、"alert" は要注意、"entry-todo" は未エントリー。 */
-export function filterByStatus<T extends { statusLabel: string; billingAlert: boolean; enteredAt: string | null }>(
+/**
+ * 先方システムへ解約を入れる必要がまだある案件か。
+ * cancelTarget = 解約済みで、申込未完了 (3DS離脱等) ではないもの (解約CSVに載る案件と同じ)。
+ */
+export function isCancelTodo(r: { cancelTarget: boolean; cancelEnteredAt: string | null }): boolean {
+  return r.cancelTarget && !r.cancelEnteredAt;
+}
+
+/** ステータスタブでの絞り込み。"all" / 未指定は素通し、"alert" は要注意、"entry-todo" は未エントリー、
+ *  "cancel-todo" は解約未エントリー。 */
+export function filterByStatus<T extends {
+  statusLabel: string; billingAlert: boolean; enteredAt: string | null;
+  cancelTarget: boolean; cancelEnteredAt: string | null;
+}>(
   rows: T[],
   status: string | null | undefined,
 ): T[] {
   if (!status || status === "all") return rows;
   if (status === "alert") return rows.filter((r) => r.billingAlert);
   if (status === "entry-todo") return rows.filter(isEntryTodo);
+  if (status === "cancel-todo") return rows.filter(isCancelTodo);
   return rows.filter((r) => r.statusLabel === status);
 }
 

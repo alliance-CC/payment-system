@@ -116,6 +116,12 @@ export async function getEnteredMap(ids: string[]): Promise<Map<string, string |
   return getContractColumnMap(ids, "entered_at");
 }
 
+/** contract_id → 解約エントリー済み日時 のマップをベストエフォートで取得
+ *  (列 p006 未適用なら空 = 解約済みは全件「未」表示になる)。 */
+export async function getCancelEnteredMap(ids: string[]): Promise<Map<string, string | null>> {
+  return getContractColumnMap(ids, "cancel_entered_at");
+}
+
 /** contract_id → SAF案件番号 のマップをベストエフォートで取得
  *  (列 p005 未適用なら空 = 入力欄が空で表示される)。 */
 export async function getSafCaseNoMap(ids: string[]): Promise<Map<string, string | null>> {
@@ -156,17 +162,39 @@ export async function setEnteredByAccountIds(
   accountIds: string[],
   entered: boolean,
 ): Promise<{ ok: boolean; count: number; error?: string }> {
+  return setMarkByAccountIds("entered_at", accountIds, entered);
+}
+
+/**
+ * 会員IDの一覧に「解約エントリー済み」を立てる / 外す (エンカンAI・管理画面のチェック保存)。
+ * 立てるのは解約済み (canceled_at あり) の案件だけ。失敗は握りつぶさない (理由は setEnteredByAccountIds と同じ)。
+ * 列 p006 が未適用ならその旨を error で返す。
+ */
+export async function setCancelEnteredByAccountIds(
+  accountIds: string[],
+  entered: boolean,
+): Promise<{ ok: boolean; count: number; error?: string }> {
+  return setMarkByAccountIds("cancel_entered_at", accountIds, entered);
+}
+
+async function setMarkByAccountIds(
+  column: "entered_at" | "cancel_entered_at",
+  accountIds: string[],
+  entered: boolean,
+): Promise<{ ok: boolean; count: number; error?: string }> {
   const ids = accountIds.map((s) => String(s ?? "").trim()).filter(Boolean);
   if (!ids.length) return { ok: true, count: 0 };
   try {
     const service = createSupabaseService();
     let qb = service
       .from("payment_contracts")
-      .update({ entered_at: entered ? new Date().toISOString() : null })
+      .update({ [column]: entered ? new Date().toISOString() : null })
       .in("account_id", ids);
-    // 既にエントリー済みの案件は日時を上書きしない (いつ対応したかの記録を残すため)。
+    // 既に済みの案件は日時を上書きしない (いつ対応したかの記録を残すため)。
     // 結果の件数も「実際に変わった件数」になる。
-    if (entered) qb = qb.is("entered_at", null);
+    if (entered) qb = qb.is(column, null);
+    // 解約していない案件に「解約エントリー済み」を立てない
+    if (entered && column === "cancel_entered_at") qb = qb.not("canceled_at", "is", null);
     const { data, error } = await qb.select("id");
     if (error) return { ok: false, count: 0, error: error.message };
     return { ok: true, count: (data ?? []).length };

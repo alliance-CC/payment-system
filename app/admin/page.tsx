@@ -11,6 +11,7 @@ import { cronHealth, describeAgo, CRON_STALE_HOURS } from "@/features/payments/c
 import { todayJst } from "@/features/payments/billing-config";
 import {
   cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
+  markCancelEnteredAction,
   saveSafCaseNoAction, saveServiceStartDateAction,
 } from "./actions";
 import CancelButton from "./CancelButton";
@@ -37,6 +38,7 @@ const STATUS_TABS = [
   { key: "申込未完了", label: "申込未完了" },
   { key: "alert", label: "要注意" },
   { key: "entry-todo", label: "未エントリー" },
+  { key: "cancel-todo", label: "解約未エントリー" },
 ] as const;
 
 function billingBadge(v: RegistrantRow["monthBilling"]) {
@@ -77,7 +79,7 @@ export default async function AdminBoardPage({
   searchParams: {
     month?: string; scope?: string; status?: string; q?: string;
     del?: string; plan?: string; testcharge?: string; code?: string;
-    select?: string; entry?: string; n?: string; eerr?: string;
+    select?: string; entry?: string; centry?: string; n?: string; eerr?: string;
     cancel?: string; cerr?: string;
     saf?: string; saferr?: string;
     ss?: string; ssdate?: string; sserr?: string;
@@ -93,17 +95,20 @@ export default async function AdminBoardPage({
   const q = searchParams.q ?? "";
 
   // エントリー済みチェックの選択モード (?select=1)。URLで持つのでリロードしても外れない
-  const selectMode = searchParams.select === "1";
+  // 解約エントリー済みのチェックは別のモード (?select=cancel)。選べる行が違う (解約した案件だけ) ため分ける
+  const cancelSelect = searchParams.select === "cancel";
+  const selectMode = searchParams.select === "1" || cancelSelect;
 
   // 直前に編集した会員ID。横に長い一覧なので、どの行が変わったかを色で示す
   // (画面上部の結果メッセージまでスクロールしなくても気づけるようにするため)
   const highlight = searchParams.hl ?? "";
 
   // 一覧の表示状態を保ったままの遷移先を組み立てる (更新・タブ切替・全案件リンク)
-  const boardHref = (o: { scope?: string; status?: string; select?: boolean } = {}) => {
+  const boardHref = (o: { scope?: string; status?: string; select?: boolean | "cancel" } = {}) => {
     const p = new URLSearchParams({ month, scope: o.scope ?? scope, status: o.status ?? status });
     if (q) p.set("q", q);
-    if (o.select ?? selectMode) p.set("select", "1");
+    const sel = o.select ?? (cancelSelect ? "cancel" : selectMode);
+    if (sel) p.set("select", sel === "cancel" ? "cancel" : "1");
     return `/admin?${p.toString()}`;
   };
   const del = searchParams.del ?? "";
@@ -142,6 +147,17 @@ export default async function AdminBoardPage({
     err: {
       text: `エントリー済みの保存に失敗しました${searchParams.eerr ? `（${searchParams.eerr}）` : ""}。`
         + " entered_at 列が未作成の可能性があります（p004_entered_at.sql を実行してください）。",
+      ok: false,
+    },
+  };
+  const centryRes = searchParams.centry ?? "";
+  const centryMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: `${entryN}件を「解約エントリー済み」にしました。`, ok: true },
+    undo: { text: `${entryN}件の「解約エントリー済み」を取り消しました。`, ok: true },
+    none: { text: "案件が選択されていません。チェックを入れてから保存してください。", ok: false },
+    err: {
+      text: `解約エントリー済みの保存に失敗しました${searchParams.eerr ? `（${searchParams.eerr}）` : ""}。`
+        + " cancel_entered_at 列が未作成の可能性があります（p006_cancel_entered_at.sql を実行してください）。",
       ok: false,
     },
   };
@@ -271,6 +287,11 @@ export default async function AdminBoardPage({
           </div>
         )}
         {/* エントリー済みチェックの結果通知 */}
+        {centryRes && centryMsg[centryRes] && (
+          <div className={"card p-3 text-sm " + (centryMsg[centryRes].ok ? "text-good" : "text-bad")}>
+            {centryMsg[centryRes].text}
+          </div>
+        )}
         {entryRes && entryMsg[entryRes] && (
           <div className={"card p-3 text-sm " + (entryMsg[entryRes].ok ? "text-good" : "text-bad")}>
             {entryMsg[entryRes].text}
@@ -319,6 +340,7 @@ export default async function AdminBoardPage({
               <span className="text-muted">申込未完了 <b className="text-accent">{counts.incomplete}</b></span>
             )}
             <span className="text-muted">未エントリー <b className="text-accent">{counts.entryTodo}</b></span>
+            <span className="text-muted">解約未エントリー <b className="text-accent">{counts.cancelTodo}</b></span>
             <span className="text-muted flex items-center gap-1">
               <AlertTriangle size={13} className="text-bad" />要注意 <b className="text-bad">{counts.alerts}</b>
             </span>
@@ -373,14 +395,15 @@ export default async function AdminBoardPage({
 
         {/* エントリー済みチェック: 通常はボタン1つ、押すと選択モード (チェック欄 + 保存) */}
         {selectMode ? (
-          <form id={MARK_FORM_ID} action={markEnteredAction} className="card p-3 flex flex-wrap items-center gap-2">
+          <form id={MARK_FORM_ID} action={cancelSelect ? markCancelEnteredAction : markEnteredAction}
+                className="card p-3 flex flex-wrap items-center gap-2">
             <ViewState month={month} scope={scope} status={status} q={q} />
             <span className="text-sm font-medium text-navy flex items-center gap-1.5">
-              <CheckSquare size={14} />エントリー済みにする案件をチェックしてください
+              <CheckSquare size={14} />{cancelSelect ? "解約エントリー済み" : "エントリー済み"}にする案件をチェックしてください
             </span>
             <div className="flex items-center gap-2 ml-auto">
               <button name="entered" value="1" className="btn btn-primary text-xs py-1">
-                チェックした案件を「エントリー済み」にする
+                チェックした案件を「{cancelSelect ? "解約エントリー済み" : "エントリー済み"}」にする
               </button>
               <button name="entered" value="0" className="btn text-xs py-1">
                 取り消す
@@ -395,6 +418,9 @@ export default async function AdminBoardPage({
             <Link href={boardHref({ select: true })} className="btn flex items-center gap-1 text-xs py-1">
               <CheckSquare size={14} />エントリー済みをチェックする
             </Link>
+            <Link href={boardHref({ select: "cancel" })} className="btn flex items-center gap-1 text-xs py-1">
+              <CheckSquare size={14} />解約エントリー済みをチェックする
+            </Link>
             {counts.entryTodo > 0 && (
               <span className="text-[11px] text-muted">
                 未エントリー {counts.entryTodo} 件
@@ -403,6 +429,19 @@ export default async function AdminBoardPage({
                     <span className="mx-1">·</span>
                     <Link href={boardHref({ status: "entry-todo" })} className="underline text-navy">
                       未エントリーだけ表示
+                    </Link>
+                  </>
+                )}
+              </span>
+            )}
+            {counts.cancelTodo > 0 && (
+              <span className="text-[11px] text-muted">
+                解約未エントリー {counts.cancelTodo} 件
+                {status !== "cancel-todo" && (
+                  <>
+                    <span className="mx-1">·</span>
+                    <Link href={boardHref({ status: "cancel-todo" })} className="underline text-navy">
+                      解約未エントリーだけ表示
                     </Link>
                   </>
                 )}
@@ -447,13 +486,14 @@ export default async function AdminBoardPage({
                 <th className="px-3 py-2 font-medium">支払方法</th>
                 <th className="px-3 py-2 font-medium">規約</th>
                 <th className="px-3 py-2 font-medium">解約日</th>
+                <th className="px-3 py-2 font-medium">解約エントリー</th>
                 <th className="px-3 py-2 font-medium">操作</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={selectMode ? 16 : 15} className="px-3 py-8 text-center text-muted">
+                  <td colSpan={selectMode ? 17 : 16} className="px-3 py-8 text-center text-muted">
                     該当する登録者がいません
                     {scope === "month" && (
                       <>
@@ -480,7 +520,17 @@ export default async function AdminBoardPage({
                           申込未完了・解約(未エントリー)にチェックを付けられると、
                           「すべて選択」で誤って外部ダッシュボードに載ってしまうため。
                           既にエントリー済みの行は、取り消せるよう常に選べる。 */}
-                      {r.enteredAt || r.statusLabel === "利用前" || r.statusLabel === "利用中" ? (
+                      {cancelSelect ? (
+                        // 解約エントリーは、解約CSVに載る案件 (と、取り消せるよう既に済みの案件) だけ選べる
+                        r.cancelTarget || r.cancelEnteredAt ? (
+                          <input
+                            type="checkbox" name="accountIds" value={r.accountId} form={MARK_FORM_ID}
+                            aria-label={`${r.accountId} を選択`}
+                          />
+                        ) : (
+                          <span className="text-muted" title="解約エントリーの対象外です">—</span>
+                        )
+                      ) : r.enteredAt || r.statusLabel === "利用前" || r.statusLabel === "利用中" ? (
                         // 行内の他フォームと入れ子にならないよう form 属性で保存先を指定する
                         <input
                           type="checkbox" name="accountIds" value={r.accountId} form={MARK_FORM_ID}
@@ -555,6 +605,15 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2 text-muted">{r.paymentMethod}</td>
                   <td className="px-3 py-2">{r.consented ? <span className="chip chip-good">同意済</span> : <span className="chip chip-bad">未同意</span>}</td>
                   <td className="px-3 py-2 text-muted">{r.canceledAt ?? "-"}</td>
+                  <td className="px-3 py-2">
+                    {r.cancelEnteredAt ? (
+                      <span className="chip chip-good" title={`${r.cancelEnteredAt} に解約エントリー済み`}>済</span>
+                    ) : r.cancelTarget ? (
+                      <span className="chip chip-gold">未</span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5">
                       {r.rawStatus !== "canceled" && (
