@@ -12,7 +12,7 @@ import { todayJst } from "@/features/payments/billing-config";
 import {
   cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
   markCancelEnteredAction,
-  saveSafCaseNoAction, saveServiceStartDateAction,
+  saveSafCaseNoAction, saveServiceStartDateAction, saveCancelDateAction,
 } from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
@@ -83,6 +83,7 @@ export default async function AdminBoardPage({
     cancel?: string; cerr?: string;
     saf?: string; saferr?: string;
     ss?: string; ssdate?: string; sserr?: string;
+    cd?: string; cdate?: string; cderr?: string;
     hl?: string;
   };
 }) {
@@ -190,6 +191,23 @@ export default async function AdminBoardPage({
       ok: false,
     },
   };
+  // 解約日の訂正結果
+  const cdRes = searchParams.cd ?? "";
+  const cdMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: {
+      text: `解約日を ${searchParams.cdate ?? ""} に変更しました（エントリータブの退会日・外部ダッシュボードも同じ日付になります）。`,
+      ok: true,
+    },
+    nosheet: {
+      text: `解約日を ${searchParams.cdate ?? ""} に変更しましたが、エントリータブの退会日は書き直せませんでした`
+        + `${searchParams.cderr ? `（${searchParams.cderr}）` : ""}。シートは手で直してください。`,
+      ok: false,
+    },
+    err: {
+      text: `解約日の変更に失敗しました${searchParams.cderr ? `（${searchParams.cderr}）` : ""}。`,
+      ok: false,
+    },
+  };
   const [{ rows, counts, totalAll, outOfScopeAlerts }, plans, settings] = await Promise.all([
     loadBoard({ month, status, q, scope }),
     loadPlans(),
@@ -278,6 +296,12 @@ export default async function AdminBoardPage({
         {ssRes && ssMsg[ssRes] && (
           <div className={"card p-3 text-sm " + (ssMsg[ssRes].ok ? "text-good" : "text-bad")}>
             {ssMsg[ssRes].text}
+          </div>
+        )}
+        {/* 解約日の訂正結果 */}
+        {cdRes && cdMsg[cdRes] && (
+          <div className={"card p-3 text-sm " + (cdMsg[cdRes].ok ? "text-good" : "text-bad")}>
+            {cdMsg[cdRes].text}
           </div>
         )}
         {/* SAF案件番号の保存結果 */}
@@ -604,7 +628,22 @@ export default async function AdminBoardPage({
                   </td>
                   <td className="px-3 py-2 text-muted">{r.paymentMethod}</td>
                   <td className="px-3 py-2">{r.consented ? <span className="chip chip-good">同意済</span> : <span className="chip chip-bad">未同意</span>}</td>
-                  <td className="px-3 py-2 text-muted">{r.canceledAt ?? "-"}</td>
+                  <td className="px-3 py-2">
+                    {/* 解約日は解約ボタンを押した日。ずれたときはここで訂正する
+                        (エントリータブの退会日・外部ダッシュボードも揃う) */}
+                    {r.rawStatus === "canceled" && r.canceledAt ? (
+                      <form action={saveCancelDateAction}>
+                        <input type="hidden" name="accountId" value={r.accountId} />
+                        <ViewState month={month} scope={scope} status={status} q={q} />
+                        <InlineEdit
+                          name="cancelDate" type="date" value={r.canceledAt} width="w-36"
+                          label={`${r.accountId} の解約日`}
+                        />
+                      </form>
+                    ) : (
+                      <span className="text-muted">{r.canceledAt ?? "-"}</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2">
                     {r.cancelEnteredAt ? (
                       <span className="chip chip-good" title={`${r.cancelEnteredAt} に解約エントリー済み`}>済</span>
