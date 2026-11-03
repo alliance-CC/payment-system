@@ -1450,6 +1450,51 @@ export async function changeServiceStartDate(accountId: string, newDate: string)
   return { ok: true, chargeStartDate, nextChargeUpdated, keptNextCharge };
 }
 
+/**
+ * 解約日の訂正 (管理画面の「解約日」欄)。
+ *
+ * 解約ボタンを押した日がそのまま解約日になるため、日付をまたいで押した等で
+ * 実際の解約日とずれたときに直す。canceled_at を指定日 (JST 正午) に書き換え、
+ * 連携シートのエントリータブ H列「退会日」も同じ日付で書き直す。
+ * 外部向けダッシュボード (/partner)・CSV・売上集計は canceled_at を読むので一緒に揃う。
+ *
+ * 解約状態・課金停止・VeriTrans 側には触れない (日付の訂正だけ)。
+ */
+export async function changeCancelDate(accountId: string, newDate: string): Promise<{
+  ok: boolean; error?: string;
+  /** エントリータブの「退会日」を書けたか (書けなくても日付の訂正自体は成立) */
+  sheetOk?: boolean; sheetError?: string;
+}> {
+  const date = String(newDate ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(`${date}T12:00:00+09:00`).getTime())) {
+    return { ok: false, error: "日付の形式が正しくありません" };
+  }
+  if (date > todayJst()) return { ok: false, error: "未来の日付は解約日にできません" };
+
+  const contract = await getContractByAccountId(accountId);
+  if (!contract) return { ok: false, error: "対象の案件が見つかりませんでした" };
+  if (contract.status !== "canceled" || !contract.canceled_at) {
+    return { ok: false, error: "解約済みの案件ではありません" };
+  }
+  const applied = jstDateOf(contract.started_at);
+  if (applied && date < applied) return { ok: false, error: `申込日 (${applied}) より前にはできません` };
+
+  try {
+    // JST 正午で保存する (UTC 変換で日付がずれないように)
+    await updateContractRow(contract.id, { canceled_at: new Date(`${date}T12:00:00+09:00`).toISOString() });
+  } catch (e: any) {
+    return { ok: false, error: `解約日の更新に失敗しました: ${String(e?.message ?? e)}` };
+  }
+
+  // 申込未完了はエントリータブに行が無い (解約でもない) ので書かない
+  const incomplete = await getIncompleteContractIds([contract.id]).catch(() => new Set<string>());
+  if (incomplete.has(contract.id)) return { ok: true };
+
+  const sheet: SheetWriteResult = await updateEntryWithdrawalDate(contract.account_id, date)
+    .catch((e) => ({ ok: false as const, reason: "error" as const, error: String(e?.message ?? e) }));
+  return { ok: true, sheetOk: sheet.ok, sheetError: describeSheetFailure(sheet) };
+}
+
 export async function cancelSubscription(accountId: string): Promise<{
   ok: boolean; error?: string; effectiveUntil?: string;
   /** 連携スプレッドシートのエントリータブに「退会日」を書けたか

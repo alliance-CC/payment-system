@@ -2,7 +2,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE } from "@/features/admin/auth";
-import { cancelSubscription, changeServiceStartDate } from "@/features/payments/billing";
+import { cancelSubscription, changeServiceStartDate, changeCancelDate } from "@/features/payments/billing";
 import {
   hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds, setCancelEnteredByAccountIds,
   setSafCaseNo,
@@ -216,6 +216,25 @@ export async function saveServiceStartDateAction(formData: FormData): Promise<vo
     ssdate: res.chargeStartDate ?? "",
     hl: accountId,   // 変更した行を一覧で目立たせる
   }));
+}
+
+// 解約日の訂正。解約ボタンを押した日とずれたときに直す (解約状態・課金停止はそのまま)。
+//   エントリータブの「退会日」と外部向けダッシュボードの表示も同じ日付になる。
+export async function saveCancelDateAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  const date = String(formData.get("cancelDate") ?? "").trim();
+  if (!accountId) redirect(backToBoard(formData));
+
+  const res = await changeCancelDate(accountId, date);
+  if (!res.ok) {
+    redirect(backToBoard(formData, {
+      cd: "err", cderr: (res.error ?? "unknown").slice(0, 200), hl: accountId,
+    }));
+  }
+  redirect(backToBoard(formData, res.sheetOk === false
+    ? { cd: "nosheet", cdate: date, cderr: (res.sheetError ?? "").slice(0, 200), hl: accountId }
+    : { cd: "ok", cdate: date, hl: accountId }));
 }
 
 // 案件の完全削除 (テスト案件のクリーンアップ用)。DBから物理削除・取り消し不可。
