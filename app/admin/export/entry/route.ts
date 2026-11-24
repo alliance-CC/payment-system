@@ -5,6 +5,7 @@ import { todayJst } from "@/features/payments/billing-config";
 import { parsePlanKind, filterByPlanKind } from "@/features/payments/plan-kind";
 import { toExcelCsv, csvHeaders } from "@/features/payments/csv";
 import { entryCsvLines } from "@/features/payments/entry-csv";
+import { plusEntryCsvLines } from "@/features/payments/plus-entry-csv";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 //   ・カード等の決済個人情報は一切含めない (§7)
 //   ・plan=plus|premium で、その区分だけを出す (先方の入れ先がプラスとプレミアムで別のため)。
 //     plan が無ければ全件 (前に保存したリンクのため)。
+//   ・⚠️ プラスは入れ先が別なので形も別 (plus-entry-csv.ts・先方の見本の47列)。入力日・データ連携日はダウンロードした日。
 
 function validDate(s: string | null, fallback: string): string {
   return s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : fallback;
@@ -37,7 +39,7 @@ export async function GET(req: Request) {
 
   const rows = filterByPlanKind(await loadEntryExport(from, to), kind);
 
-  const lines = entryCsvLines(rows, withHeader);
+  const lines = kind === "plus" ? plusEntryCsvLines(rows, withHeader, today) : entryCsvLines(rows, withHeader);
 
   // Excel の「CSV (コンマ区切り)」として開けるよう Shift_JIS / CRLF で出力する
   const tag = kind ? `_${kind}` : "";

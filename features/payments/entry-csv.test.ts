@@ -4,7 +4,7 @@ import { entryCsvLines, ENTRY_HEADER } from "./entry-csv";
 
 const row = {
   accountId: "MR1", licenseKey: "LK", serviceStartDate: "2026-10-01",
-  chargeStartDate: "2026-12-01", lastNameKanji: "山田", firstNameKanji: "太郎",
+  chargeStartDate: "2026-12-01", appliedDate: "2026-09-15", lastNameKanji: "山田", firstNameKanji: "太郎",
   mobilePhone: "090-1234-5678", planKind: "premium" as const,
 };
 

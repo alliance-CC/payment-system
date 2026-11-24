@@ -417,7 +417,7 @@ export default async function AdminBoardPage({
               見出し行を含める
             </label>
             <span className="text-[11px] text-muted pb-1.5">
-              エントリー=申込日 / 解約=解約日 で抽出。プラス（A・B）とプレミアム（A・B）は入れ先が別なので、別のCSVになります
+              エントリー=申込日 / 解約=解約日 で抽出。プラス（A・B）とプレミアム（A・B）は入れ先が別なので、別のCSVになります（プラスのエントリーは先方の見本の47列）
             </span>
             <p className="text-[11px] text-muted w-full">
               データローダ = SAF案件番号 / 付帯名 / 課金開始日 / 解約日。申込日で抽出し、

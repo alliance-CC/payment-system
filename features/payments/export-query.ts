@@ -18,6 +18,7 @@ export type EntryExportRow = {
   licenseKey: string;        // ライセンスキー_ウイルスバスター (プラスは空)
   serviceStartDate: string;  // サービス開始日
   chargeStartDate: string;   // 課金開始日
+  appliedDate: string;       // 申込日 (JST・YYYY-MM-DD)。プラスの入れ先は「サービス開始日」にこれを入れる
   lastNameKanji: string;
   firstNameKanji: string;
   mobilePhone: string;
@@ -115,6 +116,7 @@ async function toEntryRows(all: any[]): Promise<EntryExportRow[]> {
       // next_charge_date は課金のたびに翌月へ進むため使わない。
       // 課金済みの案件を再出力したときに「課金開始日」がずれてしまう。
       chargeStartDate: chargeStartDateFrom(serviceStart, policy.freeMonths, policy.chargeDay),
+      appliedDate: applied,
       lastNameKanji: last,
       firstNameKanji: first,
       mobilePhone: formatPhoneJp(r.contact_phone),   // 先方へはハイフン付きで統一
