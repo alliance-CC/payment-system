@@ -173,4 +173,15 @@ describe("検索", () => {
   it("該当なしは空", () => {
     expect(filterByQuery(rows, "存在しない")).toHaveLength(0);
   });
+
+  it("フリガナでも探せる (ひらがな・半角カナ・セイメイをつなげても)", () => {
+    const withKana = [
+      { ...rows[0], kana: "ヤマダ タロウ" },
+      { ...rows[1], kana: "" },
+    ];
+    expect(filterByQuery(withKana, "ヤマダ").map((r) => r.accountId)).toEqual(["MR7f9abc"]);
+    expect(filterByQuery(withKana, "やまだたろう").map((r) => r.accountId)).toEqual(["MR7f9abc"]);
+    expect(filterByQuery(withKana, "ﾀﾛｳ").map((r) => r.accountId)).toEqual(["MR7f9abc"]);
+    expect(filterByQuery(withKana, "スズキ")).toHaveLength(0);
+  });
 });

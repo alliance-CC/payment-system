@@ -73,7 +73,7 @@ vi.mock("./store", () => ({
   listDueContracts: async () => [], hasSuccessfulCharge: async () => false,
   hasInDoubtAttempt: async () => false, countConsentsForAccount: async () => 1,
   beginChargeAttempt: async () => "duplicate", markChargePending: async () => {},
-  insertConsent: async () => {}, updateServiceStartDate: async () => {},
+  insertConsent: async () => {}, updateServiceStartDate: async () => {}, updateContactKana: async () => {},
 }));
 
 // エントリータブの代役 (顧客IDの重複は本物と同じく書かない)。

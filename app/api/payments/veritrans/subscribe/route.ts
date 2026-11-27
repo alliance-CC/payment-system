@@ -3,8 +3,9 @@ import { registerSubscription, start3dsSubscription } from "@/features/payments/
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { createSupabaseService } from "@/shared/db/service";
 import { rateLimit, clientIpOf } from "@/shared/utils/rateLimit";
+import { normalizeKanaPart, joinKana } from "@/features/payments/kana";
 
-// 継続課金の申込 (§1.1 フル: 同意 → 氏名/電話 → 支払方法 → 登録 → CRM → 通知)。
+// 継続課金の申込 (§1.1 フル: 同意 → 氏名/フリガナ/電話 → 支払方法 → 登録 → CRM → 通知)。
 //   - オープン申込 (§0) のため認証は課さない。IP 単位のレート制限で連打/bot の
 //     一次防壁とする (§10。厳密化が必要なら共有ストア型に置き換え)。
 //   - 金額はサーバー側でプラン定義から決定 (§7: クライアントを信用しない)。
@@ -17,7 +18,7 @@ export async function POST(req: Request) {
       { status: 429, headers: { "Retry-After": String(rl.retryAfterSec) } });
   }
   const body = await req.json().catch(() => ({}));
-  const { planId, name, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate, cardholderName } = body ?? {};
+  const { planId, name, kanaLast, kanaFirst, phone, email, token, tokenKey, caseId, consentAccepted, tenantSlug, serviceStartDate, cardholderName } = body ?? {};
 
   if (!consentAccepted) {
     return NextResponse.json({ error: "consent-required" }, { status: 400 });
@@ -29,6 +30,13 @@ export async function POST(req: Request) {
   const phoneStr = String(phone ?? "").trim();
   if (!nameStr || !phoneStr) {
     return NextResponse.json({ error: "name-and-phone-required" }, { status: 400 });
+  }
+  // フリガナ (セイ・メイ) は必須 (担当者 2026-11-27：先方へのエントリーに要る)。
+  // 全角カタカナにそろえ、カタカナにできなければ弾く (画面と同じ決まり = kana.ts)。
+  const kanaLastStr = normalizeKanaPart(kanaLast);
+  const kanaFirstStr = normalizeKanaPart(kanaFirst);
+  if (!kanaLastStr || !kanaFirstStr) {
+    return NextResponse.json({ error: "kana-required" }, { status: 400 });
   }
   // メールは必須 (登録完了メールの送信先 §②)
   const emailStr = String(email ?? "").trim();
@@ -52,6 +60,7 @@ export async function POST(req: Request) {
     tenantId,
     planId: String(planId ?? ""),
     name: nameStr.slice(0, 100),
+    kana: joinKana(kanaLastStr, kanaFirstStr),
     phone: phoneStr.slice(0, 30),
     email: emailStr.slice(0, 200),
     paymentMethod: "card" as const,

@@ -6,6 +6,7 @@ import { plusEntryCsvLines, PLUS_ENTRY_HEADER, PLUS_PRODUCT_NAME, slashDate } fr
 const row = {
   accountId: "MR1", licenseKey: "", serviceStartDate: "2026-12-01",
   chargeStartDate: "2026-12-01", appliedDate: "2026-11-05", lastNameKanji: "山田", firstNameKanji: "太郎",
+  lastNameKana: "ヤマダ", firstNameKana: "タロウ",
   mobilePhone: "090-1234-5678", planKind: "plus" as const,
 };
 const at = (h: string) => PLUS_ENTRY_HEADER.indexOf(h);
@@ -30,13 +31,21 @@ describe("プラスのエントリーCSV", () => {
     expect(cols[at("サービス開始日")]).toBe("2026/11/5");   // 申込日 (利用開始日ではない)
     expect(cols[at("契約者名_姓")]).toBe("山田");
     expect(cols[at("契約者名_名")]).toBe("太郎");
-    expect(cols[at("契約者名_セイ")]).toBe("");            // 申込でカナを聞いていない
-    expect(cols[at("契約者名_メイ")]).toBe("");
+    expect(cols[at("契約者名_セイ")]).toBe("ヤマダ");      // 申込で聞いたフリガナ
+    expect(cols[at("契約者名_メイ")]).toBe("タロウ");
     expect(cols[at("電話番号①")]).toBe("090-1234-5678");
     expect(cols[at("商品名")]).toBe(PLUS_PRODUCT_NAME);
     const filled = new Set(["入力日", "データ連携日", "計上開始日", "契約番号", "サービス開始日",
-                            "契約者名_姓", "契約者名_名", "電話番号①", "商品名"].map(at));
+                            "契約者名_姓", "契約者名_名", "契約者名_セイ", "契約者名_メイ",
+                            "電話番号①", "商品名"].map(at));
     cols.forEach((v, i) => { if (!filled.has(i)) expect(v).toBe(""); });
+  });
+
+  it("フリガナを聞く前の案件は、セイ・メイが空のまま", () => {
+    const [line] = plusEntryCsvLines([{ ...row, lastNameKana: "", firstNameKana: "" }], false, "2026-11-24");
+    const cols = line.split(",");
+    expect(cols[at("契約者名_セイ")]).toBe("");
+    expect(cols[at("契約者名_メイ")]).toBe("");
   });
 
   it("見出しは選んだときだけ (先方の FMT の1行目と同じ)", () => {

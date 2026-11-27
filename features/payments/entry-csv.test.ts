@@ -5,6 +5,7 @@ import { entryCsvLines, ENTRY_HEADER } from "./entry-csv";
 const row = {
   accountId: "MR1", licenseKey: "LK", serviceStartDate: "2026-10-01",
   chargeStartDate: "2026-12-01", appliedDate: "2026-09-15", lastNameKanji: "山田", firstNameKanji: "太郎",
+  lastNameKana: "ヤマダ", firstNameKana: "タロウ",
   mobilePhone: "090-1234-5678", planKind: "premium" as const,
 };
 
@@ -17,11 +18,21 @@ describe("エントリーCSV", () => {
     expect(cols[2]).toBe("LK");
     expect(cols[7]).toBe("2026-10-01");
     expect(cols[8]).toBe("2026-12-01");
+    expect(cols[11]).toBe("ヤマダ");   // L 契約者名_姓_カナ
+    expect(cols[12]).toBe("タロウ");   // M 契約者名_名_カナ
     expect(cols[13]).toBe("山田");
     expect(cols[14]).toBe("太郎");
     expect(cols[21]).toBe("090-1234-5678");
     // 区分 (プラス/プレミアム) は分けるためだけに持つ。先方の列には出さない
     expect(line).not.toContain("premium");
+  });
+
+  it("フリガナを聞く前の案件は、カナの列が空のまま", () => {
+    const [line] = entryCsvLines([{ ...row, lastNameKana: "", firstNameKana: "" }], false);
+    const cols = line.split(",");
+    expect(cols[11]).toBe("");
+    expect(cols[12]).toBe("");
+    expect(cols[13]).toBe("山田");
   });
 
   it("見出しありなら1行目が見出し", () => {

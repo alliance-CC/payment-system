@@ -6,8 +6,9 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import {
-  getServiceStartMap, getLicenseKeyMap, getSafCaseNoMap, getIncompleteContractIds,
+  getServiceStartMap, getLicenseKeyMap, getSafCaseNoMap, getIncompleteContractIds, getContactKanaMap,
 } from "./store";
+import { splitKana } from "./kana";
 import { formatPhoneJp } from "./phone";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom } from "./billing-config";
 import { fetchAllPages } from "./db-paging";
@@ -21,6 +22,8 @@ export type EntryExportRow = {
   appliedDate: string;       // 申込日 (JST・YYYY-MM-DD)。プラスの入れ先は「サービス開始日」にこれを入れる
   lastNameKanji: string;
   firstNameKanji: string;
+  lastNameKana: string;      // セイ (全角カタカナ)。申込で聞く前の案件・列 p007 未適用は空
+  firstNameKana: string;     // メイ
   mobilePhone: string;
   planKind: PlanKind | null; // プラス / プレミアム (先方の入れ先が別。CSV には出さない・分けるのに使う)
 };
@@ -100,12 +103,14 @@ async function toEntryRows(all: any[]): Promise<EntryExportRow[]> {
 
   const ids = rows.map((r: any) => r.id);
   // 利用開始日(p001)・ライセンスキー(p002) は列が無い環境でも落とさない (空で出力)
-  const [ssMap, lkMap, policy] = await Promise.all([
-    getServiceStartMap(ids), getLicenseKeyMap(ids), loadBillingPolicy(),
+  // フリガナ(p007) も同じ。聞く前の案件は空のまま出す
+  const [ssMap, lkMap, policy, kanaMap] = await Promise.all([
+    getServiceStartMap(ids), getLicenseKeyMap(ids), loadBillingPolicy(), getContactKanaMap(ids),
   ]);
 
   return rows.map((r: any) => {
     const { last, first } = splitName(r.contact_name);
+    const kana = splitKana(kanaMap.get(r.id));
     const applied = jstDate(r.started_at);
     // 利用開始日: 選択値があればそれ、無ければ申込日の翌月1日 (管理ボードと同じ規則)
     const serviceStart = ssMap.get(r.id) || (applied ? firstChargeDate(applied, 1) : "");
@@ -119,6 +124,8 @@ async function toEntryRows(all: any[]): Promise<EntryExportRow[]> {
       appliedDate: applied,
       lastNameKanji: last,
       firstNameKanji: first,
+      lastNameKana: kana.last,
+      firstNameKana: kana.first,
       mobilePhone: formatPhoneJp(r.contact_phone),   // 先方へはハイフン付きで統一
       planKind: planKind(r.plan_id, r.plan_name),
     };

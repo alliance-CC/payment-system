@@ -22,8 +22,8 @@ export const PLUS_ENTRY_HEADER = [
   "物件番号",              // K  ▲
   "契約者名_姓",           // L  ●
   "契約者名_名",           // M  ●
-  "契約者名_セイ",         // N  ● (申込でカナを聞いていないので空。先方に確認中)
-  "契約者名_メイ",         // O  ● (同上)
+  "契約者名_セイ",         // N  ● (申込でフリガナを聞く前の案件は空)
+  "契約者名_メイ",         // O  ●
   "電話番号①",             // P  ● ハイフン有り
   "電話番号②",             // Q  ▲
   "メールアドレス",        // R  ▲
@@ -86,7 +86,9 @@ export function plusEntryCsvLines(rows: EntryExportRow[], withHeader: boolean, i
     cols[COL["サービス開始日"]] = slashDate(r.appliedDate);   // 見本の備考どおり「申込日」
     cols[COL["契約者名_姓"]] = r.lastNameKanji;
     cols[COL["契約者名_名"]] = r.firstNameKanji;
-    // 契約者名_セイ・メイ：申込でカナを聞いていないので空 (担当者 2026-11-24：いまは空でよい・先方に確認中)
+    // 契約者名_セイ・メイ：申込で聞いたフリガナ (担当者 2026-11-27)。聞く前の案件は空のまま
+    cols[COL["契約者名_セイ"]] = r.lastNameKana;
+    cols[COL["契約者名_メイ"]] = r.firstNameKana;
     cols[COL["電話番号①"]] = r.mobilePhone;
     cols[COL["商品名"]] = PLUS_PRODUCT_NAME;
     lines.push(cols.map(csvCell).join(","));

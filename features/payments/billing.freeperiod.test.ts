@@ -110,6 +110,7 @@ vi.mock("./store", () => ({
   getLicenseKeyMap: async (_ids: string[]) => new Map<string, string | null>(),
   insertConsent: async (row: any) => { mem.consents.push(row); },
   updateServiceStartDate: async (_id: string, _date: string | null) => { /* 列 p001 のベストエフォート保存 (テストでは no-op) */ },
+  updateContactKana: async () => { /* 列 p007 のベストエフォート保存 (テストでは no-op) */ },
   getServiceStartMap: async (_ids: string[]) => new Map<string, string | null>(),
   updateLicenseKey: async (_id: string, _key: string | null) => { /* 列 p002 のベストエフォート保存 (テストでは no-op) */ },
 }));
