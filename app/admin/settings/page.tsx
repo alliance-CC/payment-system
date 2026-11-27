@@ -107,6 +107,27 @@ export default async function SettingsPage({ searchParams }: {
             <p className="text-[11px] text-muted flex items-center gap-1"><Plus size={11} />行が足りなければ保存後にまた空行が出ます。</p>
           </section>
 
+          {/* 申込画面 */}
+          <section className="card p-4 space-y-2">
+            <h2 className="font-semibold text-navy text-sm">申込画面</h2>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                name="showNoMamoruLink"
+                defaultChecked={policy.showNoMamoruLink}
+                className="mt-1"
+              />
+              <span>
+                「まもるんをご不要な方はこちら」のリンクを出す
+                <span className="block text-[11px] text-muted">
+                  お客様がまもるん無しのプラン（プラスA・プレミアムA）に切り替えられるリンクです。
+                  チェックを外すと申込画面に出ません。出し直すときはチェックを入れて保存するだけで、すぐ出ます。
+                  隠しているあいだも、まもるん無しのプランを直接開くURL（<span className="font-mono">?v=a</span>・<span className="font-mono">?plan=plusA</span>）は今までどおり開けます。
+                </span>
+              </span>
+            </label>
+          </section>
+
           {/* 継続課金 */}
           <section className="card p-4 grid sm:grid-cols-2 gap-4">
             <h2 className="font-semibold text-navy text-sm sm:col-span-2">継続課金</h2>

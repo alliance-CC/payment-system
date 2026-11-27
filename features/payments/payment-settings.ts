@@ -17,6 +17,8 @@ export type PaymentSettings = {
   notifyEmail: string | null;            // 申込通知先メール(自社宛)
   termsVersion: string;                  // 規約バージョン
   cancelPolicy: "end_of_month" | "immediate"; // 解約: 当月末まで利用可(翌月停止) / 即時停止
+  /** 申込画面に「まもるんをご不要な方はこちら」を出すか (未保存なら出さない) */
+  showNoMamoruLink?: boolean;
   // 利用者への登録完了メール(件名/本文)。プレースホルダ {name}{accountId}{planName}{amount}{serviceStartDate}{chargeStartDate}
   welcomeEmail?: { subject: string; body: string };
 
