@@ -25,6 +25,9 @@ export type BillingPolicy = {
   chargeDay: number;
   /** 解約時の停止タイミング。end_of_month=当月末まで利用可(翌月から停止・§規約) / immediate=即時停止。 */
   cancelPolicy: "end_of_month" | "immediate";
+  /** 申込画面に「まもるんをご不要な方はこちら」を出すか。既定は出さない (担当者 2026-11-27：いまは隠す)。
+   *  管理画面 /admin/settings の「申込画面」で切り替える (デプロイし直さずに、すぐ出し直せる)。 */
+  showNoMamoruLink: boolean;
 };
 
 export function getBillingPolicy(): BillingPolicy {
@@ -43,6 +46,7 @@ export function getBillingPolicy(): BillingPolicy {
     freeMonths: Math.max(0, parseInt(process.env.PAYMENTS_FREE_MONTHS ?? "2", 10) || 0),
     chargeDay: Math.min(28, Math.max(1, parseInt(process.env.PAYMENTS_CHARGE_DAY ?? "1", 10) || 1)),
     cancelPolicy: process.env.PAYMENTS_CANCEL_POLICY === "immediate" ? "immediate" : "end_of_month",
+    showNoMamoruLink: String(process.env.PAYMENTS_SHOW_NO_MAMORU_LINK ?? "false").toLowerCase() === "true",
   };
 }
 
@@ -62,6 +66,7 @@ export async function loadBillingPolicy(): Promise<BillingPolicy> {
     ...(typeof s.freeMonths === "number" ? { freeMonths: Math.max(0, s.freeMonths) } : {}),
     ...(typeof s.chargeDay === "number" ? { chargeDay: Math.min(28, Math.max(1, s.chargeDay)) } : {}),
     ...(s.cancelPolicy === "immediate" || s.cancelPolicy === "end_of_month" ? { cancelPolicy: s.cancelPolicy } : {}),
+    ...(typeof s.showNoMamoruLink === "boolean" ? { showNoMamoruLink: s.showNoMamoruLink } : {}),
   };
 }
 

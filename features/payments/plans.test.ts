@@ -3,7 +3,7 @@
 //   B … まもるん有り (plus 1320 / premium 1870 ＝ 従来プラン。既存契約はすべて B)
 // 顧客には A/B を見せず、社内表記(name)にのみ現れることを固定する。
 import { describe, it, expect } from "vitest";
-import { getPlans, getPlan, customerPlanName } from "./plans";
+import { getPlans, getPlan, customerPlanName, noMamoruLinks } from "./plans";
 
 describe("プラン体系 (まもるん有無の A/B)", () => {
   it("4プランが定義され、表示順は B(まもるん有り) → A(無し)", () => {
@@ -55,5 +55,31 @@ describe("プラン体系 (まもるん有無の A/B)", () => {
   it("variant で A/B を判別できる", () => {
     expect(getPlan("plus")?.variant).toBe("B");
     expect(getPlan("plusA")?.variant).toBe("A");
+  });
+});
+
+describe("「まもるんをご不要な方はこちら」の導線 (noMamoruLinks)", () => {
+  const all = getPlans();
+  const plus = getPlan("plus");
+
+  it("出さない設定なら、プラン選択画面にも確定画面にも出さない (担当者 2026-11-27：いまは隠す)", () => {
+    expect(noMamoruLinks(all, { show: false, wantA: false, keepQs: "" }))
+      .toEqual({ altHref: null, altOf: {} });
+    expect(noMamoruLinks(all, { show: false, selected: plus, wantA: false, keepQs: "" }))
+      .toEqual({ altHref: null, altOf: {} });
+  });
+
+  it("出す設定なら、今までどおり (選択画面＝?v=a へ・確定画面＝その場で A へ)", () => {
+    const pick = noMamoruLinks(all, { show: true, wantA: false, keepQs: "&case=006XX" });
+    expect(pick.altHref).toBe("/subscribe?v=a&case=006XX");
+    expect(pick.altOf).toEqual({ plus: "plusA", premium: "premiumA" });
+
+    const locked = noMamoruLinks(all, { show: true, selected: plus, wantA: false, keepQs: "" });
+    expect(locked.altHref).toBeNull();
+    expect(locked.altOf.plus).toBe("plusA");
+  });
+
+  it("まもるん無しを見ているときは選択画面の導線を出さない", () => {
+    expect(noMamoruLinks(all, { show: true, wantA: true, keepQs: "" }).altHref).toBeNull();
   });
 });

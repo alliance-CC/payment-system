@@ -11,20 +11,24 @@ import {
 import { formatPhoneJp } from "./phone";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom } from "./billing-config";
 import { fetchAllPages } from "./db-paging";
+import { planKind, type PlanKind } from "./plan-kind";
 
 export type EntryExportRow = {
   accountId: string;
   licenseKey: string;        // ライセンスキー_ウイルスバスター (プラスは空)
   serviceStartDate: string;  // サービス開始日
   chargeStartDate: string;   // 課金開始日
+  appliedDate: string;       // 申込日 (JST・YYYY-MM-DD)。プラスの入れ先は「サービス開始日」にこれを入れる
   lastNameKanji: string;
   firstNameKanji: string;
   mobilePhone: string;
+  planKind: PlanKind | null; // プラス / プレミアム (先方の入れ先が別。CSV には出さない・分けるのに使う)
 };
 
 export type CancelExportRow = {
   accountId: string;
   canceledDate: string;
+  planKind: PlanKind | null; // プラス / プレミアム (先方の入れ先が別。CSV には出さない・分けるのに使う)
 };
 
 export type DataLoaderExportRow = {
@@ -73,7 +77,7 @@ export async function loadEntryExport(from: string, to: string): Promise<EntryEx
   const all = await fetchAllPages<any>(
     (from, to) => svc
       .from("payment_contracts")
-      .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
+      .select("id, account_id, plan_id, plan_name, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
       // 解約済みは新規エントリーとして渡さない。解約は解約CSV(解約日軸)の担当。
       // これを入れないと、申込月を後から出力し直したときに解約者まで新規として並ぶ。
       .is("canceled_at", null)
@@ -112,9 +116,11 @@ async function toEntryRows(all: any[]): Promise<EntryExportRow[]> {
       // next_charge_date は課金のたびに翌月へ進むため使わない。
       // 課金済みの案件を再出力したときに「課金開始日」がずれてしまう。
       chargeStartDate: chargeStartDateFrom(serviceStart, policy.freeMonths, policy.chargeDay),
+      appliedDate: applied,
       lastNameKanji: last,
       firstNameKanji: first,
       mobilePhone: formatPhoneJp(r.contact_phone),   // 先方へはハイフン付きで統一
+      planKind: planKind(r.plan_id, r.plan_name),
     };
   });
 }
@@ -134,7 +140,7 @@ export async function loadEntryTodoExport(since: string): Promise<EntryExportRow
   const all = await fetchAllPages<any>(
     (from, to) => svc
       .from("payment_contracts")
-      .select("id, account_id, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
+      .select("id, account_id, plan_id, plan_name, contact_name, contact_phone, next_charge_date, started_at, canceled_at")
       .is("entered_at", null)
       .is("canceled_at", null)
       .neq("status", "canceled")
@@ -154,7 +160,7 @@ export async function loadCancelExport(from: string, to: string): Promise<Cancel
   const all = await fetchAllPages<any>(
     (from, to) => svc
       .from("payment_contracts")
-      .select("id, account_id, canceled_at")
+      .select("id, account_id, plan_id, plan_name, canceled_at")
       .not("canceled_at", "is", null)
       .gte("canceled_at", gte)
       .lt("canceled_at", lt)
@@ -171,6 +177,7 @@ export async function loadCancelExport(from: string, to: string): Promise<Cancel
     .map((r: any) => ({
       accountId: r.account_id ?? "",
       canceledDate: jstDate(r.canceled_at),
+      planKind: planKind(r.plan_id, r.plan_name),
     }));
 }
 
@@ -187,7 +194,7 @@ export async function loadCancelTodoExport(since: string): Promise<CancelExportR
   const all = await fetchAllPages<any>(
     (from, to) => svc
       .from("payment_contracts")
-      .select("id, account_id, canceled_at")
+      .select("id, account_id, plan_id, plan_name, canceled_at")
       .not("canceled_at", "is", null)
       .is("cancel_entered_at", null)
       .gte("canceled_at", gte)
@@ -202,6 +209,7 @@ export async function loadCancelTodoExport(since: string): Promise<CancelExportR
     .map((r: any) => ({
       accountId: r.account_id ?? "",
       canceledDate: jstDate(r.canceled_at),
+      planKind: planKind(r.plan_id, r.plan_name),
     }));
 }
 

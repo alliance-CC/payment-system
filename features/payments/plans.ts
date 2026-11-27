@@ -118,3 +118,24 @@ export async function loadPlans(): Promise<Plan[]> {
 export async function loadPlan(id: string): Promise<Plan | undefined> {
   return (await loadPlans()).find((p) => p.id === id);
 }
+
+/**
+ * 「まもるんをご不要な方はこちら」の導線 (申込画面)。
+ *   show=false なら出さない (管理画面 /admin/settings の「申込画面」で切り替える・既定は出さない)。
+ *   ⚠️ 隠すのはリンクだけ。まもるん無しのプランそのもの (?v=a・?plan=plusA) は今までどおり開ける
+ *      (出し直すときにチェックを入れるだけで元に戻るように、プランもURLも残しておく)。
+ *   altHref … プラン選択画面からの導線 (ページ遷移。入力前なので失うものが無い)
+ *   altOf   … プラン確定画面でその場で切り替える先 (プランID → まもるん無し版のID)
+ */
+export function noMamoruLinks(
+  all: Plan[],
+  opts: { show: boolean; selected?: Plan; wantA: boolean; keepQs: string },
+): { altHref: string | null; altOf: Record<string, string> } {
+  if (!opts.show) return { altHref: null, altOf: {} };
+  return {
+    altHref: !opts.selected && !opts.wantA ? `/subscribe?v=a${opts.keepQs}` : null,
+    altOf: Object.fromEntries(
+      all.filter((p) => p.withoutMamoruPlanId).map((p) => [p.id, p.withoutMamoruPlanId!]),
+    ),
+  };
+}

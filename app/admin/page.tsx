@@ -6,6 +6,7 @@ import { requireAdmin } from "@/features/admin/auth";
 import { loadBoard, type RegistrantRow } from "@/features/payments/admin-query";
 import { parseScope } from "@/features/payments/admin-filter";
 import { loadPlans } from "@/features/payments/plans";
+import { PLAN_KINDS, PLAN_KIND_LABEL } from "@/features/payments/plan-kind";
 import { loadPaymentSettings } from "@/features/payments/payment-settings";
 import { cronHealth, describeAgo, CRON_STALE_HOURS } from "@/features/payments/cron-health";
 import { todayJst } from "@/features/payments/billing-config";
@@ -392,12 +393,20 @@ export default async function AdminBoardPage({
             <input type="date" name="from" defaultValue={today} className="input py-1 text-xs" required aria-label="開始日" />
             <span className="text-muted text-xs pb-1.5">〜</span>
             <input type="date" name="to" defaultValue={today} className="input py-1 text-xs" required aria-label="終了日" />
-            <button formAction="/admin/export/entry" className="btn btn-primary text-xs py-1 flex items-center gap-1">
-              <Download size={12} />エントリー
-            </button>
-            <button formAction="/admin/export/cancel" className="btn text-xs py-1 flex items-center gap-1">
-              <Download size={12} />解約
-            </button>
+            {/* 先方 (nuworks) の入れ先がプラスとプレミアムで別なので、エントリー・解約は区分ごとに出す。
+                押したボタンの name/value (plan) がフォームと一緒に送られる */}
+            {PLAN_KINDS.map((k) => (
+              <button key={`e-${k}`} formAction="/admin/export/entry" name="plan" value={k}
+                      className="btn btn-primary text-xs py-1 flex items-center gap-1">
+                <Download size={12} />エントリー（{PLAN_KIND_LABEL[k]}）
+              </button>
+            ))}
+            {PLAN_KINDS.map((k) => (
+              <button key={`c-${k}`} formAction="/admin/export/cancel" name="plan" value={k}
+                      className="btn text-xs py-1 flex items-center gap-1">
+                <Download size={12} />解約（{PLAN_KIND_LABEL[k]}）
+              </button>
+            ))}
             <button formAction="/admin/export/dataloader" className="btn text-xs py-1 flex items-center gap-1">
               <Download size={12} />データローダ
             </button>
@@ -408,7 +417,7 @@ export default async function AdminBoardPage({
               見出し行を含める
             </label>
             <span className="text-[11px] text-muted pb-1.5">
-              エントリー=申込日 / 解約=解約日 で抽出
+              エントリー=申込日 / 解約=解約日 で抽出。プラス（A・B）とプレミアム（A・B）は入れ先が別なので、別のCSVになります（プラスのエントリーは先方の見本の47列）
             </span>
             <p className="text-[11px] text-muted w-full">
               データローダ = SAF案件番号 / 付帯名 / 課金開始日 / 解約日。申込日で抽出し、

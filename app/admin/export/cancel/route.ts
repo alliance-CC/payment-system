@@ -2,12 +2,15 @@ import { NextResponse } from "next/server";
 import { isAuthed } from "@/features/admin/auth";
 import { loadCancelExport } from "@/features/payments/export-query";
 import { todayJst } from "@/features/payments/billing-config";
+import { parsePlanKind, filterByPlanKind } from "@/features/payments/plan-kind";
 import { csvCell, toExcelCsv, csvHeaders } from "@/features/payments/csv";
 
 export const dynamic = "force-dynamic";
 
 // ④-2 解約CSV。解約日を軸に、指定した期間 (from〜to) の解約を出力する。
 //   項目は 顧客ID(会員ID) と 解約日 のみ (画像4)。
+//   plan=plus|premium で、その区分だけを出す (先方の入れ先がプラスとプレミアムで別のため)。
+//   plan が無ければ全件 (前に保存したリンクのため)。
 const HEADER = ["顧客ID", "解約日"];
 
 function validDate(s: string | null, fallback: string): string {
@@ -27,11 +30,15 @@ export async function GET(req: Request) {
   // チェックボックスは hidden と併用するため、順序に依存しない形で判定する。
   const withHeader = url.searchParams.getAll("header").includes("1");
 
-  const rows = await loadCancelExport(from, to);
+  const kind = parsePlanKind(url.searchParams.get("plan"));
+  if (kind === "invalid") return NextResponse.json({ error: "bad-plan" }, { status: 400 });
+
+  const rows = filterByPlanKind(await loadCancelExport(from, to), kind);
 
   const lines = withHeader ? [HEADER.map(csvCell).join(",")] : [];
   for (const r of rows) lines.push([r.accountId, r.canceledDate].map(csvCell).join(","));
 
   // Excel の「CSV (コンマ区切り)」として開けるよう Shift_JIS / CRLF で出力する
-  return new NextResponse(toExcelCsv(lines), { headers: csvHeaders(`cancel_${from}_${to}.csv`) });
+  const tag = kind ? `_${kind}` : "";
+  return new NextResponse(toExcelCsv(lines), { headers: csvHeaders(`cancel${tag}_${from}_${to}.csv`) });
 }

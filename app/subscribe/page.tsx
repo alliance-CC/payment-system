@@ -1,5 +1,5 @@
 import { loadVeritransConfig, toPublicConfig } from "@/features/payments/veritrans/config";
-import { loadPlans, customerPlanName } from "@/features/payments/plans";
+import { loadPlans, customerPlanName, noMamoruLinks } from "@/features/payments/plans";
 import { loadBillingPolicy } from "@/features/payments/billing-config";
 import { resolveTenantIdBySlug } from "@/features/payments/tenant";
 import SignupFlow from "./SignupFlow";
@@ -42,17 +42,16 @@ export default async function SubscribePage({
   const plans = visible.map((p) => ({ id: p.id, name: customerPlanName(p), amount: p.amount }));
   const planPreselected = !!selected;
 
-  // まもるん無しへの導線 (まもるん有りを見ているときだけ出す)
+  // まもるん無しへの導線 (まもるん有りを見ているときだけ・設定で出すときだけ)
   const keep = new URLSearchParams();
   if (searchParams.case) keep.set("case", searchParams.case);
   if (searchParams.tenant) keep.set("tenant", searchParams.tenant);
   const keepQs = keep.toString() ? `&${keep.toString()}` : "";
-  // プラン選択画面からの導線はページ遷移 (入力前なので失うものが無い)
-  const altHref = !selected && !wantA ? `/subscribe?v=a${keepQs}` : null;
-  // プラン確定画面はその場で切り替える (planId → まもるん無し版のID)
-  const altOf = Object.fromEntries(
-    all.filter((p) => p.withoutMamoruPlanId).map((p) => [p.id, p.withoutMamoruPlanId!]),
-  );
+  // プラン選択画面からの導線はページ遷移・プラン確定画面はその場で切り替える。
+  // 出すかどうかは管理画面の「申込画面」で決める (既定は出さない・担当者 2026-11-27：いまは隠す)。
+  const { altHref, altOf } = noMamoruLinks(all, {
+    show: policy.showNoMamoruLink, selected, wantA, keepQs,
+  });
 
   return (
     <main className="min-h-screen bg-bg flex items-center justify-center p-6">
