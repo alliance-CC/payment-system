@@ -66,6 +66,16 @@ export async function setServiceStartDate(
   }
 }
 
+/** フリガナ (「セイ メイ」) をベストエフォートで保存 (列 p007 未適用でも申込を失敗させない)。 */
+export async function updateContactKana(id: string, kana: string | null): Promise<void> {
+  if (!kana) return;
+  try {
+    const service = createSupabaseService();
+    const { error } = await service.from("payment_contracts").update({ contact_kana: kana }).eq("id", id);
+    if (error) console.error("[payments] contact_kana を保存できませんでした (p007 未適用？):", error.message);
+  } catch { /* 列が無ければ申込はそのまま (管理画面から入れ直せる) */ }
+}
+
 /** ライセンスキーをベストエフォートで保存 (列 p002 未適用でも申込を失敗させない)。 */
 export async function updateLicenseKey(id: string, key: string | null): Promise<void> {
   try {
@@ -75,7 +85,7 @@ export async function updateLicenseKey(id: string, key: string | null): Promise<
 }
 
 /**
- * 追加列 (p001/p002/p004/p005) を contract_id 単位で引く共通処理。
+ * 追加列 (p001/p002/p004/p005/p007) を contract_id 単位で引く共通処理。
  *
  * ・.in() は id をURLに並べるため、件数が増えるとURL長の上限に当たる。
  *   200件ずつに分けて問い合わせる (1件あたり36文字のUUIDでも約7KB)。
@@ -126,6 +136,33 @@ export async function getCancelEnteredMap(ids: string[]): Promise<Map<string, st
  *  (列 p005 未適用なら空 = 入力欄が空で表示される)。 */
 export async function getSafCaseNoMap(ids: string[]): Promise<Map<string, string | null>> {
   return getContractColumnMap(ids, "saf_case_no");
+}
+
+/** contract_id → フリガナ (「セイ メイ」) のマップをベストエフォートで取得 (列 p007 未適用なら空)。 */
+export async function getContactKanaMap(ids: string[]): Promise<Map<string, string | null>> {
+  return getContractColumnMap(ids, "contact_kana");
+}
+
+/**
+ * フリガナを1件保存する (管理画面の行の編集から)。value は保存する形 (「セイ メイ」) か null (消す)。
+ * 保存漏れに気づけるよう、失敗は握りつぶさず呼び出し側へ返す。
+ */
+export async function setContactKana(
+  accountId: string, value: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const id = String(accountId ?? "").trim();
+  if (!id) return { ok: false, error: "会員IDが空です" };
+  try {
+    const service = createSupabaseService();
+    const { error } = await service
+      .from("payment_contracts")
+      .update({ contact_kana: value })
+      .eq("account_id", id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
 }
 
 /**

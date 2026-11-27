@@ -2,6 +2,7 @@
 //
 // DB アクセスも server-only も含まないため単体テストできる。
 // ここは「表示する行を選ぶ」だけの処理であり、課金・解約などの処理には一切関与しない。
+import { toKatakana } from "./kana";
 
 /** 一覧の表示範囲。month = 対象月に申し込んだ案件のみ / all = 全案件 */
 export type BoardScope = "month" | "all";
@@ -70,18 +71,21 @@ function digits(v: string | null | undefined): string {
   return String(v ?? "").replace(/[^0-9]/g, "");
 }
 
-/** 会員ID / お客様名 / 電話番号 での検索。 */
-export function filterByQuery<T extends { accountId: string; name: string | null; phone: string | null }>(
+/** 会員ID / お客様名 / フリガナ / 電話番号 での検索。 */
+export function filterByQuery<T extends { accountId: string; name: string | null; phone: string | null; kana?: string }>(
   rows: T[],
   q: string | null | undefined,
 ): T[] {
   const needle = (q ?? "").trim().toLowerCase();
   if (!needle) return rows;
   const needleDigits = digits(needle);
+  // フリガナはひらがな・半角カナで探してもヒットさせる (保存は全角カタカナ・「セイ メイ」)
+  const needleKana = toKatakana(needle);
   return rows.filter(
     (r) =>
       r.accountId.toLowerCase().includes(needle) ||
       (r.name ?? "").toLowerCase().includes(needle) ||
+      (!!needleKana && (r.kana ?? "").replace(/ /g, "").includes(needleKana)) ||
       (r.phone ?? "").toLowerCase().includes(needle) ||
       // 「090-1234-5678」でも「09012345678」でもヒットするよう数字同士でも比較する
       (needleDigits.length > 0 && digits(r.phone).includes(needleDigits)),

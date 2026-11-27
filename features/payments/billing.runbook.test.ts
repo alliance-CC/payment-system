@@ -88,7 +88,7 @@ vi.mock("./store", () => ({
   claimChargeFinalization: async () => false,
   getLicenseKeyMap: async () => new Map<string, string | null>(),
   insertConsent: async (row: any) => { mem.consents.push(row); },
-  updateServiceStartDate: async () => {},
+  updateServiceStartDate: async () => {}, updateContactKana: async () => {},
   setServiceStartDate: async (id: string, date: string) => {
     const c = mem.contracts.find((x) => x.id === id);
     if (c) c.service_start_date = date;

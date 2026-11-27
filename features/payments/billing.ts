@@ -22,7 +22,7 @@ import {
   insertContract, getContractByAccountId, getContractById, updateContractRow, listDueContracts,
   hasSuccessfulCharge, hasInDoubtAttempt, countConsentsForAccount,
   beginChargeAttempt, finishChargeAttempt, markChargePending, getInDoubtCharge,
-  insertConsent, updateServiceStartDate, getServiceStartMap, updateLicenseKey, getLicenseKeyMap,
+  insertConsent, updateServiceStartDate, updateContactKana, getServiceStartMap, updateLicenseKey, getLicenseKeyMap,
   getChargeByOrderId, claimChargeFinalization, listInDoubt3dsCharges, hasUnfinishedInitialCharge,
   listCanceledContracts, setServiceStartDate, hasChargedEver, getIncompleteContractIds,
   type ContractRow,
@@ -40,6 +40,8 @@ export type SubscribeInput = {
   tenantId?: string | null;         // OEM: ?tenant= で解決したテナント。無指定は既定テナント
   planId: string;
   name: string;
+  /** フリガナ「セイ メイ」(全角カタカナ・kana.ts でそろえたもの)。先方へのエントリーCSVで使う */
+  kana?: string | null;
   phone: string;
   email?: string | null;
   paymentMethod: "card";            // 口座振替は仕様確定後に別系統で追加 (§2.1)
@@ -334,6 +336,8 @@ export async function registerSubscription(input: SubscribeInput): Promise<Subsc
 
   // 利用開始日を保存 (列 p001 未適用でも申込は失敗させない)。
   await updateServiceStartDate(contract.id, serviceStart);
+  // フリガナ (列 p007 未適用でも申込は失敗させない)
+  await updateContactKana(contract.id, input.kana ?? null);
 
   // 初回課金の記録 (orderId 一意)。無料期間ありは申込時に課金していないため記録しない
   // — 初回の実課金は無料期間終了後 (初回課金日) に日次 Cron が行い、そこで charge 行が作られる。
@@ -653,6 +657,8 @@ export async function start3dsSubscription(
     });
   }
   await updateServiceStartDate(contract.id, serviceStart);
+  // フリガナ (列 p007 未適用でも申込は失敗させない)
+  await updateContactKana(contract.id, input.kana ?? null);
 
   // 課金行 (ok=null) を VT 呼び出し前に確保 — orderId UNIQUE が冪等の要 (§5-② と同型)。
   // 無料期間ありは 0 円与信 (カード有効性確認+会員登録のみ。ガイド 4.2.1: 少額与信は

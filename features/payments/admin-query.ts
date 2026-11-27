@@ -1,7 +1,7 @@
 import "server-only";
 import { createSupabaseService } from "@/shared/db/service";
 import {
-  getServiceStartMap, getLicenseKeyMap, getEnteredMap, getSafCaseNoMap, getCancelEnteredMap,
+  getServiceStartMap, getLicenseKeyMap, getEnteredMap, getSafCaseNoMap, getCancelEnteredMap, getContactKanaMap,
   getIncompleteContractIds,
 } from "./store";
 import { loadBillingPolicy, firstChargeDate, chargeStartDateFrom, todayJst } from "./billing-config";
@@ -23,6 +23,7 @@ export type RegistrantRow = {
   statusLabel: "利用前" | "利用中" | "解約" | "申込未完了";
   rawStatus: string;        // active/delinquent/suspended/canceled/card_expired
   name: string | null;
+  kana: string;             // フリガナ「セイ メイ」(申込で聞く前の案件・列 p007 未適用は空文字)
   phone: string | null;
   email: string | null;
   consented: boolean;       // 利用規約 同意済み
@@ -88,6 +89,8 @@ export async function loadBoard(
     rowsRaw.filter((c: any) => c.canceled_at).map((c: any) => c.id));
   // SAF案件番号 (列 p005 未適用なら空 → 入力欄が空で表示される)
   const safMap = await getSafCaseNoMap(ids);
+  // フリガナ (列 p007 未適用なら空 → 「未入力」で表示される)
+  const kanaMap = await getContactKanaMap(ids);
 
   // 同意記録の有無 (account_id 単位)。
   // 1000件で切れると、同意済みの人が「未同意」と表示されてしまうので全件読む。
@@ -193,6 +196,7 @@ export async function loadBoard(
       statusLabel,
       rawStatus: c.status,
       name: c.contact_name,
+      kana: kanaMap.get(c.id) ?? "",
       phone: c.contact_phone,
       email: c.contact_email,
       consented: consentSet.has(c.account_id),

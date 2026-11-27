@@ -5,9 +5,10 @@ import { verifyPassword, sessionToken, requireAdmin, ADMIN_COOKIE, ADMIN_MAX_AGE
 import { cancelSubscription, changeServiceStartDate, changeCancelDate } from "@/features/payments/billing";
 import {
   hardDeleteContractByAccountId, getContractByAccountId, updateContractRow, setEnteredByAccountIds, setCancelEnteredByAccountIds,
-  setSafCaseNo,
+  setSafCaseNo, setContactKana,
 } from "@/features/payments/store";
 import { loadPlan } from "@/features/payments/plans";
+import { normalizeKanaPart, joinKana } from "@/features/payments/kana";
 import { chargeByAccount, deleteAccount } from "@/features/payments/veritrans/paynowid";
 import { loadVeritransConfig } from "@/features/payments/veritrans/config";
 import { savePaymentSettings, loadPaymentSettings, patchPaymentSettings, type PaymentSettings } from "@/features/payments/payment-settings";
@@ -195,6 +196,33 @@ export async function saveSafCaseNoAction(formData: FormData): Promise<void> {
     res.ok
       ? { saf: "ok", hl: accountId }
       : { saf: "err", saferr: (res.error ?? "unknown").slice(0, 200), hl: accountId }));
+}
+
+// フリガナの保存 (申込でフリガナを聞く前の案件・入力の直し)。行の「編集」から1件ずつ。
+//   入力は「セイ メイ」(空白で区切る)。ひらがな・半角カナはカタカナにそろえる (申込画面と同じ kana.ts)。
+//   空にすると消す。決済・契約の状態には一切影響しない。
+export async function saveContactKanaAction(formData: FormData): Promise<void> {
+  requireAdmin();
+  const accountId = String(formData.get("accountId") ?? "").trim();
+  if (!accountId) redirect(backToBoard(formData));
+
+  const raw = String(formData.get("kana") ?? "").trim();
+  let value: string | null = null;
+  if (raw) {
+    const parts = raw.split(/[\s\u3000]+/).filter(Boolean);
+    const last = parts.length === 2 ? normalizeKanaPart(parts[0]) : null;
+    const first = parts.length === 2 ? normalizeKanaPart(parts[1]) : null;
+    if (!last || !first) {
+      redirect(backToBoard(formData, { kana: "bad", hl: accountId }));
+    }
+    value = joinKana(last!, first!);
+  }
+
+  const res = await setContactKana(accountId, value);
+  redirect(backToBoard(formData,
+    res.ok
+      ? { kana: "ok", hl: accountId }
+      : { kana: "err", kanaerr: (res.error ?? "unknown").slice(0, 200), hl: accountId }));
 }
 
 // 利用開始日の変更。課金開始日の起点なので、次回課金日の扱いは billing 側で判断する

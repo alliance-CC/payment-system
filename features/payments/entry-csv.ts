@@ -4,7 +4,7 @@ import type { EntryExportRow } from "./export-query";
 import { csvCell } from "./csv";
 
 // 1行目の見出しは先方フォーマットに合わせ A〜W の23項目を固定で出力する。
-// 2行目以降に値を入れるのは当システムが保持する7項目のみ (他は空欄)。
+// 2行目以降に値を入れるのは当システムが保持する9項目のみ (他は空欄)。
 export const ENTRY_HEADER = [
   "顧客ID",                        // A ← 出力
   "卸先会社コード",                // B
@@ -17,8 +17,8 @@ export const ENTRY_HEADER = [
   "課金開始日",                    // I ← 出力
   "保険適用開始日",                // J
   "解約日",                        // K
-  "契約者名_姓_カナ",              // L
-  "契約者名_名_カナ",              // M
+  "契約者名_姓_カナ",              // L ← 出力 (申込でフリガナを聞く前の案件は空)
+  "契約者名_名_カナ",              // M ← 出力
   "契約者名_姓_漢字",              // N ← 出力
   "契約者名_名_漢字",              // O ← 出力
   "生年月日",                      // P
@@ -39,6 +39,8 @@ export function entryCsvLines(rows: EntryExportRow[], withHeader: boolean): stri
     cols[2] = r.licenseKey;        // C ライセンスキー_ウイルスバスター
     cols[7] = r.serviceStartDate;  // H サービス開始日
     cols[8] = r.chargeStartDate;   // I 課金開始日
+    cols[11] = r.lastNameKana;     // L 契約者名_姓_カナ
+    cols[12] = r.firstNameKana;    // M 契約者名_名_カナ
     cols[13] = r.lastNameKanji;    // N 契約者名_姓_漢字
     cols[14] = r.firstNameKanji;   // O 契約者名_名_漢字
     cols[21] = r.mobilePhone;      // V 電話番号_携帯

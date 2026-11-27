@@ -13,7 +13,7 @@ import { todayJst } from "@/features/payments/billing-config";
 import {
   cancelAction, deleteAction, changePlanAction, testChargeAction, logoutAction, markEnteredAction,
   markCancelEnteredAction,
-  saveSafCaseNoAction, saveServiceStartDateAction, saveCancelDateAction,
+  saveSafCaseNoAction, saveServiceStartDateAction, saveCancelDateAction, saveContactKanaAction,
 } from "./actions";
 import CancelButton from "./CancelButton";
 import DeleteButton from "./DeleteButton";
@@ -83,6 +83,7 @@ export default async function AdminBoardPage({
     select?: string; entry?: string; centry?: string; n?: string; eerr?: string;
     cancel?: string; cerr?: string;
     saf?: string; saferr?: string;
+    kana?: string; kanaerr?: string;
     ss?: string; ssdate?: string; sserr?: string;
     cd?: string; cdate?: string; cderr?: string;
     hl?: string;
@@ -169,6 +170,19 @@ export default async function AdminBoardPage({
     err: {
       text: `SAF案件番号の保存に失敗しました${searchParams.saferr ? `（${searchParams.saferr}）` : ""}。`
         + " saf_case_no 列が未作成の可能性があります（p005_saf_case_no.sql を実行してください）。",
+      ok: false,
+    },
+  };
+  const kanaRes = searchParams.kana ?? "";
+  const kanaMsg: Record<string, { text: string; ok: boolean }> = {
+    ok: { text: "フリガナを保存しました。", ok: true },
+    bad: {
+      text: "フリガナを保存できませんでした。セイとメイを空白で区切って、カタカナで入れてください（例：ヤマダ タロウ）。",
+      ok: false,
+    },
+    err: {
+      text: `フリガナの保存に失敗しました${searchParams.kanaerr ? `（${searchParams.kanaerr}）` : ""}。`
+        + " contact_kana 列が未作成の可能性があります（p007_contact_kana.sql を実行してください）。",
       ok: false,
     },
   };
@@ -303,6 +317,12 @@ export default async function AdminBoardPage({
         {cdRes && cdMsg[cdRes] && (
           <div className={"card p-3 text-sm " + (cdMsg[cdRes].ok ? "text-good" : "text-bad")}>
             {cdMsg[cdRes].text}
+          </div>
+        )}
+        {/* フリガナの保存結果 */}
+        {kanaRes && kanaMsg[kanaRes] && (
+          <div className={"card p-3 text-sm " + (kanaMsg[kanaRes].ok ? "text-good" : "text-bad")}>
+            {kanaMsg[kanaRes].text}
           </div>
         )}
         {/* SAF案件番号の保存結果 */}
@@ -628,6 +648,15 @@ export default async function AdminBoardPage({
                   <td className="px-3 py-2">{billingBadge(r.monthBilling)}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.name ?? "-"}</div>
+                    {/* フリガナ (申込で聞く。聞く前の案件はここで入れる)。先方へのエントリーCSVに出る */}
+                    <form action={saveContactKanaAction} className="text-[11px]">
+                      <input type="hidden" name="accountId" value={r.accountId} />
+                      <ViewState month={month} scope={scope} status={status} q={q} />
+                      <InlineEdit
+                        name="kana" value={r.kana} width="w-36"
+                        label={`${r.accountId} のフリガナ`} placeholder="ヤマダ タロウ"
+                      />
+                    </form>
                     <div className="text-[11px] text-muted">{r.phone ?? "-"}{r.email ? ` / ${r.email}` : ""}</div>
                   </td>
                   <td className="px-3 py-2">

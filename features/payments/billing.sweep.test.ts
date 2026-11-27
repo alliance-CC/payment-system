@@ -66,7 +66,7 @@ vi.mock("./store", () => ({
   hasInDoubtAttempt: async () => false, countConsentsForAccount: async () => 1,
   beginChargeAttempt: async () => "duplicate", finishChargeAttempt: async () => {},
   markChargePending: async () => {}, getInDoubtCharge: async () => null,
-  insertConsent: async () => {}, updateServiceStartDate: async () => {},
+  insertConsent: async () => {}, updateServiceStartDate: async () => {}, updateContactKana: async () => {},
 }));
 
 vi.mock("./entry-sheet", () => ({

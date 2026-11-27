@@ -1,6 +1,6 @@
 "use client";
 // 継続課金の申込フロー (§1.1 確定・短縮版):
-//   (プラン=LPから確定) → 1. お客様情報(氏名・電話・メール・利用開始日・規約同意)
+//   (プラン=LPから確定) → 1. お客様情報(氏名・フリガナ・電話・メール・利用開始日・規約同意)
 //                        → 2. カード入力 → 完了
 //   カード番号は tokenize.ts でブラウザ→VeriTrans 直送 (サーバー非通過 §2/§7)。
 import { useState } from "react";
@@ -9,6 +9,7 @@ import {
   ChevronRight, ChevronLeft, ExternalLink,
 } from "lucide-react";
 import { tokenizeCard } from "./tokenize";
+import { toKatakana, isKatakana } from "@/features/payments/kana";
 
 type Plan = { id: string; name: string; amount: number };
 type StepKey = "plan" | "info" | "pay";
@@ -65,6 +66,11 @@ export default function SignupFlow({
   const [lastName, setLastName] = useState("");
   const [firstName, setFirstName] = useState("");
   const fullName = `${lastName.trim()} ${firstName.trim()}`.trim();
+  // フリガナ (セイ・メイ)。ひらがな・半角カナで入れても、欄を離れたときに全角カタカナへそろえる
+  const [kanaLast, setKanaLast] = useState("");
+  const [kanaFirst, setKanaFirst] = useState("");
+  const kanaLastOk = isKatakana(toKatakana(kanaLast));
+  const kanaFirstOk = isKatakana(toKatakana(kanaFirst));
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [serviceStart, setServiceStart] = useState(defaultServiceStart());
@@ -98,6 +104,7 @@ export default function SignupFlow({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           planId, name: fullName, phone, email,
+          kanaLast: toKatakana(kanaLast), kanaFirst: toKatakana(kanaFirst),
           serviceStartDate: serviceStart,
           token: tok.token, tokenKey: tok.tokenKey,
           consentAccepted: agreed,
@@ -121,6 +128,8 @@ export default function SignupFlow({
           ? "カード名義（ローマ字）をご入力ください"
           : json?.error === "too-many-requests"
           ? "アクセスが集中しています。しばらく待ってから再度お試しください"
+          : json?.error === "kana-required"
+          ? "フリガナ（セイ・メイ）をカタカナでご入力ください"
           : json?.error === "email-required"
           ? "メールアドレスをご入力ください"
           : json?.error === "veritrans-not-configured" || json?.error === "app-url-not-configured"
@@ -182,7 +191,7 @@ export default function SignupFlow({
   }
 
   const infoValid =
-    lastName.trim() !== "" && firstName.trim() !== "" &&
+    lastName.trim() !== "" && firstName.trim() !== "" && kanaLastOk && kanaFirstOk &&
     phone.trim() !== "" && isEmail(email) && !!serviceStart && agreed;
   const canNext = cur === "plan" ? !!plan : cur === "info" ? infoValid : true;
   const isLast = idx === steps.length - 1;
@@ -244,7 +253,7 @@ export default function SignupFlow({
           </div>
         )}
 
-        {/* お客様情報: 氏名・電話・メール・利用開始日・規約同意 */}
+        {/* お客様情報: 氏名・フリガナ・電話・メール・利用開始日・規約同意 */}
         {cur === "info" && (
           <div className="space-y-3">
             <div>
@@ -255,6 +264,22 @@ export default function SignupFlow({
                 <input className="input w-full" value={firstName} onChange={(e) => setFirstName(e.target.value)}
                   autoComplete="given-name" placeholder="名（太郎）" required />
               </div>
+            </div>
+            <div>
+              <div className="label">フリガナ *</div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input w-full" value={kanaLast} onChange={(e) => setKanaLast(e.target.value)}
+                  onBlur={() => setKanaLast(toKatakana(kanaLast))}
+                  aria-invalid={kanaLast !== "" && !kanaLastOk}
+                  placeholder="セイ（ヤマダ）" required />
+                <input className="input w-full" value={kanaFirst} onChange={(e) => setKanaFirst(e.target.value)}
+                  onBlur={() => setKanaFirst(toKatakana(kanaFirst))}
+                  aria-invalid={kanaFirst !== "" && !kanaFirstOk}
+                  placeholder="メイ（タロウ）" required />
+              </div>
+              {(kanaLast !== "" && !kanaLastOk) || (kanaFirst !== "" && !kanaFirstOk) ? (
+                <p className="text-[11px] text-bad mt-1">カタカナでご入力ください（ひらがなでも入力できます）</p>
+              ) : null}
             </div>
             <div>
               <div className="label">電話番号 *</div>

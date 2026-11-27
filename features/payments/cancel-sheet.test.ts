@@ -34,7 +34,7 @@ vi.mock("./store", () => ({
   countConsentsForAccount: async () => 0, beginChargeAttempt: async () => ({ id: "x" }),
   finishChargeAttempt: async () => {}, markChargePending: async () => {},
   getInDoubtCharge: async () => null, insertConsent: async () => {},
-  updateServiceStartDate: async () => {}, getServiceStartMap: async () => new Map(),
+  updateServiceStartDate: async () => {}, updateContactKana: async () => {}, getServiceStartMap: async () => new Map(),
   updateLicenseKey: async () => {}, getLicenseKeyMap: async () => new Map(),
   getChargeByOrderId: async () => null, claimChargeFinalization: async () => false,
   listInDoubt3dsCharges: async () => [], hasUnfinishedInitialCharge: async () => false,
